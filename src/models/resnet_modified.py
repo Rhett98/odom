@@ -11,11 +11,11 @@ import torch
 # There is only one downsampling done PER LAYER (therefore this differentiation between layers and blocks)
 class ResNetModified(torch.nn.Module):
     def __init__(self, in_channels, num_outputs, use_dropout=False, layers=[2, 2, 2, 2],
-                 factor_fewer_resnet_channels=1, activation_fct="relu", groups=1, width_per_group=64,
+                 factor_fewer_resnet_channels=1, activation_fct="relu", output_layer=4, groups=1, width_per_group=64,
                  replace_stride_with_dilation=None,
                  norm_layer=None):
         super(ResNetModified, self).__init__()
-
+        self.output_layer = output_layer
         block = BasicBlock
         self.activation_fct = activation_fct
 
@@ -59,7 +59,11 @@ class ResNetModified(torch.nn.Module):
                                        blocks=layers[3], stride=(2, 2),
                                        dilate=replace_stride_with_dilation[2])
         self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = torch.nn.Linear(int(512 / factor_fewer_resnet_channels) * block.expansion, num_outputs)
+        
+        self.fc1 = torch.nn.Linear(int(512 / factor_fewer_resnet_channels) * block.expansion, num_outputs)
+        self.fc2 = torch.nn.Linear(int(512 / factor_fewer_resnet_channels) * block.expansion, num_outputs)
+        self.fc3 = torch.nn.Linear(int(512 / factor_fewer_resnet_channels) * block.expansion, num_outputs)
+        self.fc4 = torch.nn.Linear(int(512 / factor_fewer_resnet_channels) * block.expansion, num_outputs)
 
         for m in self.modules():
             if isinstance(m, torch.nn.Conv2d):
@@ -102,22 +106,26 @@ class ResNetModified(torch.nn.Module):
         x = self.maxpool(x)
 
         x1 = self.layer1(x)
-
+        output1 = torch.flatten(self.avgpool(x1), 1)
+        if self.output_layer == 1:
+            return output1
         x2 = self.layer2(x1)
         # x2 = self.dropout_channels(x2)  # Dropout
-
+        output2 = torch.flatten(self.avgpool(x2), 1)
+        if self.output_layer == 2:
+            return output2
         x3 = self.layer3(x2)
         x3 = self.dropout_channels(x3)  # Dropout
-
+        output3 = torch.flatten(self.avgpool(x3), 1)
+        if self.output_layer == 3:
+            return output3
         x4 = self.layer4(x3)
-        output = self.avgpool(x4)
-        output = torch.flatten(output, 1)
+        output4 = torch.flatten(self.avgpool(x4), 1)
 
-        output = self.fc(output)
-        output = self.dropout_values(output)  # Dropout
-        features = [x1, x2, x3, x4, output]
-
-        return features
+        output4 = self.fc4(output4)
+        output4 = self.dropout_values(output4)  # Dropout
+        if self.output_layer == 4:
+            return output4
 
     def forward(self, x):
         return self._forward_impl(x)

@@ -297,23 +297,10 @@ class Deployer(object):
 
             loss_transformation /= self.batch_size
             loss = loss_transformation  # Overwrite loss for identity fitting
-            # for name, parms in self.model.named_parameters():	
-            #         print('-->name:', name)
-            #         print('-->para:', parms)
-            #         print('-->grad_requirs:',parms.requires_grad)
-            #         # print('-->grad_value:',parms.grad)
-            #         print("===")
 
             if self.training_bool:
                 loss.backward()
                 self.optimizer.step()
-                # for name, parms in self.model.named_parameters():	
-                #     print('-->name:', name)
-                #     # print('-->para:', parms)
-                #     print('-->grad_requirs:',parms.requires_grad)
-                #     print('-->grad_value:',parms.grad)
-                #     print("===")
-                # print(self.optimizer)
 
             if self.config["normalization_scaling"]:
                 for index, preprocessed_dict in enumerate(preprocessed_dicts):

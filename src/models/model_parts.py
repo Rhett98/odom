@@ -33,6 +33,12 @@ class GeometryHandler:
     @staticmethod
     def angle_axis_to_rot_matrix(euler):
         return kornia.geometry.conversions.angle_axis_to_rotation_matrix(angle_axis=euler)
+    
+    @staticmethod
+    def get_quaternion_from_transformation_matrix(matrix):
+        rotation_matrix = torch.tensor(matrix[:, :3, :3])
+        # ,order=kornia.geometry.conversions.QuaternionCoeffOrder.WXYZ
+        return kornia.geometry.conversions.rotation_matrix_to_quaternion(rotation_matrix)
 
     @staticmethod
     def get_transformation_matrix_quaternion(translation, quaternion, device):
@@ -89,3 +95,61 @@ class GeometryHandler:
         transformation_matrix[:, 3, 3] = 1
         transformation_matrix[:, :3, 3] = translation
         return transformation_matrix
+
+def mul_q_point(q_a, q_b):
+    """
+    q_a: [B, 4]
+    q_b: [B, N, 4]
+    output: [B, N, 4]
+    """
+    batch_size = q_a.shape[0]
+    q_a = q_a.view(batch_size, 1, 4)
+    # print(q_a.shape, q_b.shape)
+
+    q_result_0 = (q_a[:, :, 0] * q_b[:, :, 0]) - (q_a[:, :, 1] * q_b[:, :, 1]) - (q_a[:, :, 2] * q_b[:, :, 2]) - (q_a[:, :, 3] * q_b[:, :, 3])
+    q_result_0 = q_result_0.view(batch_size, -1, 1)
+
+    q_result_1 = (q_a[:, :, 0] * q_b[:, :, 1]) + (q_a[:, :, 1] * q_b[:, :, 0]) + (q_a[:, :, 2] * q_b[:, :, 3]) - (q_a[:, :, 3] * q_b[:, :, 2])
+    q_result_1 = q_result_1.view(batch_size, -1, 1)
+
+    q_result_2 = (q_a[:, :, 0] * q_b[:, :, 2]) - (q_a[:, :, 1] * q_b[:, :, 3]) + (q_a[:, :, 2] * q_b[:, :, 0]) + (q_a[:, :, 3] * q_b[:, :, 1])
+    q_result_2 = q_result_2.view(batch_size, -1, 1)
+
+    q_result_3 = (q_a[:, :, 0] * q_b[:, :, 3]) + (q_a[:, :, 1] * q_b[:, :, 2]) - (q_a[:, :, 2] * q_b[:, :, 1]) + (q_a[:, :, 3] * q_b[:, :, 0])
+    q_result_3 = q_result_3.view(batch_size, -1, 1)
+
+    q_result = torch.cat([q_result_0, q_result_1, q_result_2, q_result_3], dim=-1)
+    # print(q_result)
+    return q_result   ##  B N 4
+
+def mul_point_q(q_a, q_b):
+    """
+    q_b: [B, 4]
+    q_a: [B, N, 4]
+    output: [B, N, 4]
+    """
+    batch_size = q_b.shape[0]
+    q_b = q_b.view(batch_size, 1, 4)
+    # print(q_a.shape, q_b.shape)
+    q_result_0 = (q_a[:, :, 0] * q_b[:, :, 0]) - (q_a[:, :, 1] * q_b[:, :, 1]) - (q_a[:, :, 2] * q_b[:, :, 2]) - (q_a[:, :, 3] * q_b[:, :, 3])
+    q_result_0 = q_result_0.view(batch_size, -1, 1)
+
+    q_result_1 = (q_a[:, :, 0] * q_b[:, :, 1]) + (q_a[:, :, 1] * q_b[:, :, 0]) + (q_a[:, :, 2] * q_b[:, :, 3]) - (q_a[:, :, 3] * q_b[:, :, 2])
+    q_result_1 = q_result_1.view(batch_size, -1, 1)
+
+    q_result_2 = (q_a[:, :, 0] * q_b[:, :, 2]) - (q_a[:, :, 1] * q_b[:, :, 3]) + (q_a[:, :, 2] * q_b[:, :, 0]) + (q_a[:, :, 3] * q_b[:, :, 1])
+    q_result_2 = q_result_2.view(batch_size, -1, 1)
+
+    q_result_3 = (q_a[:, :, 0] * q_b[:, :, 3]) + (q_a[:, :, 1] * q_b[:, :, 2]) - (q_a[:, :, 2] * q_b[:, :, 1]) + (q_a[:, :, 3] * q_b[:, :, 0])
+    q_result_3 = q_result_3.view(batch_size, -1, 1)
+
+    q_result = torch.cat([q_result_0, q_result_1, q_result_2, q_result_3], dim=-1)
+
+    return q_result   ##  B N 4
+
+def inv_q(q):
+    q_2 = torch.sum(q * q, dim=-1, keepdim=True) + 1e-10
+    q_ = torch.cat([q[:, :1], -q[:, 1:]], dim=-1)
+    q_inv = q_ / q_2
+
+    return q_inv

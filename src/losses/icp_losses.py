@@ -250,3 +250,22 @@ class supervisedLosses(torch.nn.Module):
         loss1 = self.loss_euler(euler1, euler2)
         loss2 = self.loss_trans(trans1, trans2)
         return 10*loss1 + loss2
+    
+class GeometricLoss(torch.nn.Module):
+    """ Geometric loss function from PoseNet paper """
+    def __init__(self, sx=0.0, sq=-2.5, eps=1e-6):
+        super(GeometricLoss, self).__init__()
+        self.st = torch.nn.Parameter(torch.Tensor([sx]))
+        self.sq = torch.nn.Parameter(torch.Tensor([sq]))
+        self.loss_q = torch.nn.MSELoss()
+        self.loss_t = torch.nn.L1Loss()
+        
+    def forward(self, target_q, det_q, target_t, det_t): 
+        loss_q, loss_t = 0, 0
+        weights = [1.6, 0.8, 0.4, 0.2]
+        for i in range(0, len(det_q)):    
+            loss_q += weights[i] * self.loss_q(target_q, det_q[i])
+            loss_t += weights[i] * self.loss_t(target_t, det_t[i])
+        loss = torch.exp(-self.st)*loss_t + self.st \
+               + torch.exp(-self.sq)*loss_q + self.sq   
+        return loss

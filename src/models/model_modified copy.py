@@ -152,7 +152,7 @@ class OdometryModel(torch.nn.Module):
             proj_xyz = input_scan[:, :, point_cloud_indices_1]
             # Write projected image to batch
             images_model[index] = image_model
-        # print("priject point mun = ", proj_xyz.shape[2])
+        print("visual point mun = ", proj_xyz.shape[2])
         return images_model, proj_xyz
     
     def warp_pointcloud(self, pc_xyz, translation, rotation):
@@ -232,9 +232,7 @@ class OdometryModel(torch.nn.Module):
         l4_t_det = self.fully_connected_translation4(features_l4)
         l4_q_det = l4_q_det / torch.norm(l4_q_det)
         l4_q, l4_t = self.warp_det_result(l3_q, l3_t, l4_q_det, l4_t_det)
-        # print(l4_q_det, l3_q_det, l2_q_det, l1_q)
-        # print("______________________________")
-        # print(l4_t_det, l3_t_det, l2_t_det, l1_t)
+
         return (l4_q, l3_q, l2_q, l1_q),(l4_t, l3_t, l2_t, l1_t)
 
 if __name__ == '__main__':
