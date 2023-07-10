@@ -290,44 +290,6 @@ class GeometricLoss(torch.nn.Module):
         # print("value: ", self.st, self.sq)
         return losses
 
-# class UncertaintyLoss(torch.nn.Module):
-#     def __init__(self, v_num=7):
-#         super(UncertaintyLoss, self).__init__()
-#         sigma = torch.randn(v_num)
-#         self.sigma = torch.nn.Parameter(sigma)
-#         self.v_num = v_num
-#         self.loss_q = torch.nn.MSELoss()
-#         self.loss_t = torch.nn.L1Loss()
-        
-#     def forward(self, target_q, det_q, target_t, det_t): 
-#         loss_q0, loss_q1, loss_q2, loss_q3 = 0, 0, 0, 0
-#         loss_t0, loss_t1, loss_t2 = 0, 0, 0
-#         # weights = [0.2, 0.4, 0.8, 1.6]
-#         weights = [1.0]
-#         for i in range(0, len(det_q)):    
-#             loss_q0 += weights[i] * self.loss_q(target_q[:,0], det_q[i][:,0])
-#             loss_q1 += weights[i] * self.loss_q(target_q[:,1], det_q[i][:,1])
-#             loss_q2 += weights[i] * self.loss_q(target_q[:,2], det_q[i][:,2])
-#             loss_q3 += weights[i] * self.loss_q(target_q[:,3], det_q[i][:,3])
-#             loss_t0 += weights[i] * self.loss_t(target_t[:,0], det_t[i][:,0])  
-#             loss_t1 += weights[i] * self.loss_t(target_t[:,1], det_t[i][:,1])
-#             loss_t2 += weights[i] * self.loss_t(target_t[:,2], det_t[i][:,2])
-#         loss = torch.exp(-self.sigma[0])*loss_q0 + self.sigma[0] +\
-#                     torch.exp(-self.sigma[1])*loss_q1 + self.sigma[1] +\
-#                     torch.exp(-self.sigma[2])*loss_q2 + self.sigma[2] +\
-#                     torch.exp(-self.sigma[3])*loss_q3 + self.sigma[3] +\
-#                     torch.exp(-self.sigma[4])*loss_t0 + self.sigma[4] +\
-#                     torch.exp(-self.sigma[5])*loss_t1 + self.sigma[5] +\
-#                     torch.exp(-self.sigma[6])*loss_t2 + self.sigma[6] 
-#         losses = {
-#             "loss": loss,
-#             "st": loss,
-#             "sq": loss,
-#             "loss_q": loss_q0 + loss_q1 + loss_q2 + loss_q3,
-#             "loss_t": loss_t0 + loss_t1 + loss_t2,
-#         }
-#         return losses
-    
 class UncertaintyLoss(torch.nn.Module):
     def __init__(self, v_num=7):
         super(UncertaintyLoss, self).__init__()
@@ -338,35 +300,73 @@ class UncertaintyLoss(torch.nn.Module):
         self.loss_t = torch.nn.L1Loss()
         
     def forward(self, target_q, det_q, target_t, det_t): 
-        # print(det_q.shape, det_t.shape)
         loss_q0, loss_q1, loss_q2, loss_q3 = 0, 0, 0, 0
         loss_t0, loss_t1, loss_t2 = 0, 0, 0
-        loss_q0 = self.loss_q(target_q[:,0], det_q[:,0])
-        loss_q1 = self.loss_q(target_q[:,1], det_q[:,1])
-        loss_q2 = self.loss_q(target_q[:,2], det_q[:,2])
-        loss_q3 = self.loss_q(target_q[:,3], det_q[:,3])
-        loss_t0 = self.loss_t(target_t[:,0], det_t[:,0])  
-        loss_t1 = self.loss_t(target_t[:,1], det_t[:,1])
-        loss_t2 = self.loss_t(target_t[:,2], det_t[:,2])
-        
+        weights = [0.2, 0.4, 0.8, 1.6]
+        # weights = [1.0]
+        for i in range(0, len(det_q)):    
+            loss_q0 += weights[i] * self.loss_q(target_q[:,0], det_q[i][:,0])
+            loss_q1 += weights[i] * self.loss_q(target_q[:,1], det_q[i][:,1])
+            loss_q2 += weights[i] * self.loss_q(target_q[:,2], det_q[i][:,2])
+            loss_q3 += weights[i] * self.loss_q(target_q[:,3], det_q[i][:,3])
+            loss_t0 += weights[i] * self.loss_t(target_t[:,0], det_t[i][:,0])  
+            loss_t1 += weights[i] * self.loss_t(target_t[:,1], det_t[i][:,1])
+            loss_t2 += weights[i] * self.loss_t(target_t[:,2], det_t[i][:,2])
         loss = torch.exp(-self.sigma[0])*loss_q0 + self.sigma[0] +\
-            torch.exp(-self.sigma[1])*loss_q1 + self.sigma[1] +\
-            torch.exp(-self.sigma[2])*loss_q2 + self.sigma[2] +\
-            torch.exp(-self.sigma[3])*loss_q3 + self.sigma[3] +\
-            torch.exp(-self.sigma[4])*loss_t0 + self.sigma[4] +\
-            torch.exp(-self.sigma[5])*loss_t1 + self.sigma[5] +\
-            torch.exp(-self.sigma[6])*loss_t2 + self.sigma[6] 
-        # loss_q0 / (2 * self.sigma[0] ** 2) + loss_q1 / (2 * self.sigma[1] ** 2) +\
-        #        loss_q2 / (2 * self.sigma[2] ** 2) + loss_q3 / (2 * self.sigma[3] ** 2) +\
-        #        loss_t0 / (2 * self.sigma[4] ** 2) + loss_t1 / (2 * self.sigma[5] ** 2) +\
-        #        loss_t2 / (2 * self.sigma[6] ** 2) 
-        # loss += torch.log(self.sigma.pow(2).prod())
-        # print(loss_q0 , loss_q1 , loss_q2 , loss_q3, loss_t0 , loss_t1 , loss_t2)
+                    torch.exp(-self.sigma[1])*loss_q1 + self.sigma[1] +\
+                    torch.exp(-self.sigma[2])*loss_q2 + self.sigma[2] +\
+                    torch.exp(-self.sigma[3])*loss_q3 + self.sigma[3] +\
+                    torch.exp(-self.sigma[4])*loss_t0 + self.sigma[4] +\
+                    torch.exp(-self.sigma[5])*loss_t1 + self.sigma[5] +\
+                    torch.exp(-self.sigma[6])*loss_t2 + self.sigma[6] 
         losses = {
             "loss": loss,
-            "st": self.sigma[0],
-            "sq": self.sigma[1],
+            "st": loss,
+            "sq": loss,
             "loss_q": loss_q0 + loss_q1 + loss_q2 + loss_q3,
             "loss_t": loss_t0 + loss_t1 + loss_t2,
         }
         return losses
+    
+# class UncertaintyLoss(torch.nn.Module):
+#     def __init__(self, v_num=7):
+#         super(UncertaintyLoss, self).__init__()
+#         sigma = torch.randn(v_num)
+#         self.sigma = torch.nn.Parameter(sigma)
+#         self.v_num = v_num
+#         self.loss_q = torch.nn.MSELoss()
+#         self.loss_t = torch.nn.L1Loss()
+        
+#     def forward(self, target_q, det_q, target_t, det_t): 
+#         # print(det_q.shape, det_t.shape)
+#         loss_q0, loss_q1, loss_q2, loss_q3 = 0, 0, 0, 0
+#         loss_t0, loss_t1, loss_t2 = 0, 0, 0
+#         loss_q0 = self.loss_q(target_q[:,0], det_q[:,0])
+#         loss_q1 = self.loss_q(target_q[:,1], det_q[:,1])
+#         loss_q2 = self.loss_q(target_q[:,2], det_q[:,2])
+#         loss_q3 = self.loss_q(target_q[:,3], det_q[:,3])
+#         loss_t0 = self.loss_t(target_t[:,0], det_t[:,0])  
+#         loss_t1 = self.loss_t(target_t[:,1], det_t[:,1])
+#         loss_t2 = self.loss_t(target_t[:,2], det_t[:,2])
+        
+#         loss = torch.exp(-self.sigma[0])*loss_q0 + self.sigma[0] +\
+#             torch.exp(-self.sigma[1])*loss_q1 + self.sigma[1] +\
+#             torch.exp(-self.sigma[2])*loss_q2 + self.sigma[2] +\
+#             torch.exp(-self.sigma[3])*loss_q3 + self.sigma[3] +\
+#             torch.exp(-self.sigma[4])*loss_t0 + self.sigma[4] +\
+#             torch.exp(-self.sigma[5])*loss_t1 + self.sigma[5] +\
+#             torch.exp(-self.sigma[6])*loss_t2 + self.sigma[6] 
+#         # loss_q0 / (2 * self.sigma[0] ** 2) + loss_q1 / (2 * self.sigma[1] ** 2) +\
+#         #        loss_q2 / (2 * self.sigma[2] ** 2) + loss_q3 / (2 * self.sigma[3] ** 2) +\
+#         #        loss_t0 / (2 * self.sigma[4] ** 2) + loss_t1 / (2 * self.sigma[5] ** 2) +\
+#         #        loss_t2 / (2 * self.sigma[6] ** 2) 
+#         # loss += torch.log(self.sigma.pow(2).prod())
+#         # print(loss_q0 , loss_q1 , loss_q2 , loss_q3, loss_t0 , loss_t1 , loss_t2)
+#         losses = {
+#             "loss": loss,
+#             "st": self.sigma[0],
+#             "sq": self.sigma[1],
+#             "loss_q": loss_q0 + loss_q1 + loss_q2 + loss_q3,
+#             "loss_t": loss_t0 + loss_t1 + loss_t2,
+#         }
+#         return losses

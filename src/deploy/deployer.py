@@ -14,8 +14,8 @@ import utility.plotting
 import utility.poses
 import utility.projection
 import data.dataset
-import models.model
-# import models.model_modified
+# import models.model
+import models.model_modified
 import losses.icp_losses
 import models.pwclo
 
@@ -50,8 +50,8 @@ class Deployer(object):
                 models.model.OdometryModel(config=self.config).to(self.device),
                 example_inputs=(example_tensor, example_tensor))
         else:
-            self.model = models.model.OdometryModel(config=self.config).to(self.device)
-            # self.model = models.model_modified.OdometryModel(config=self.config).to(self.device)
+            # self.model = models.model.OdometryModel(config=self.config).to(self.device)
+            self.model = models.model_modified.OdometryModel(config=self.config).to(self.device)
             # self.model = models.pwclo.OdometryModel().to(self.device)
 
         # Geometry handler
@@ -288,10 +288,10 @@ class Deployer(object):
         # (translations, rotation_representation) = self.model(images_model_1, images_model_2)
         det_q, det_t = self.model(preprocessed_dicts)
         
-        # computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
-        #     translation=det_t[-1], quaternion=det_q[-1], device=self.device)
         computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
-            translation=det_t, quaternion=det_q, device=self.device)
+            translation=det_t[-1], quaternion=det_q[-1], device=self.device)
+        # computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
+        #     translation=det_t, quaternion=det_q, device=self.device)
         # print(computed_transformations)
         # print("*************")
         # Following part only done when loss needs to be computed
