@@ -40,8 +40,8 @@ class OdometryPublisher:
         if self.config["use_jit"]:
             self.model = torch.jit.trace(
                 models.model.OdometryModel(config=self.config).to(self.device),
-                example_inputs=(torch.zeros((1, 4, 16, 720), device=self.device),
-                                torch.zeros((1, 4, 16, 720), device=self.device)))
+                example_inputs=(torch.zeros((1, 5, 64, 1024), device=self.device),
+                                torch.zeros((1, 5, 64, 1024), device=self.device)))
         else:
             self.model = models.model.OdometryModel(config=self.config).to(self.device)
 

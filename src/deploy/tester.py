@@ -39,12 +39,10 @@ class Tester(deploy.deployer.Deployer):
 
         epoch_losses = {
             "loss_epoch": 0.0,
-            "loss_point_cloud_epoch": 0.0,
-            "loss_field_of_view_epoch": 0.0,
-            "loss_po2po_epoch": 0.0,
-            "loss_po2pl_epoch": 0.0,
-            "loss_pl2pl_epoch": 0.0,
-            "visible_pixels_epoch": 0.0,
+            "st_epoch": 0.0,
+            "sq_epoch": 0.0,
+            "loss_t_epoch": 0.0,
+            "loss_q_epoch": 0.0,
         }
         index_of_dataset = 0
         index_of_sequence = 0
@@ -135,23 +133,17 @@ class Tester(deploy.deployer.Deployer):
 
             if not self.config["inference_only"]:
                 epoch_losses["loss_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_point_cloud_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_po2po_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_po2pl_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_pl2pl_epoch"] /= self.steps_per_epoch
-                epoch_losses["visible_pixels_epoch"] /= self.steps_per_epoch
-                print("Dataset: " + format(dataset_index, '05d') + ", loss: " + str(
-                    epoch_losses["loss_epoch"]) + ", loss_point_cloud: " + str(
-                    epoch_losses["loss_point_cloud_epoch"]))
+                epoch_losses["st_epoch"] /= self.steps_per_epoch
+                epoch_losses["sq_epoch"] /= self.steps_per_epoch
+                epoch_losses["loss_t_epoch"] /= self.steps_per_epoch
+                epoch_losses["loss_q_epoch"] /= self.steps_per_epoch
+                print("Epoch Summary: " + format(dataset_index, '05d') + ", loss: " + str(
+                    epoch_losses["loss_epoch"])+ ", loss_q: " + str(
+                    epoch_losses["loss_q_epoch"])+ ", loss_t: " + str(
+                    epoch_losses["loss_t_epoch"]))
 
                 mlflow.log_metric("loss", float(epoch_losses["loss_epoch"]), step=dataset_index)
-                mlflow.log_metric("loss point cloud", float(epoch_losses["loss_point_cloud_epoch"]),
-                                  step=dataset_index)
-                mlflow.log_metric("loss po2po", float(epoch_losses["loss_po2po_epoch"]),
-                                  step=dataset_index)
-                mlflow.log_metric("loss po2pl", float(epoch_losses["loss_po2pl_epoch"]),
-                                  step=dataset_index)
-                mlflow.log_metric("loss pl2pl", float(epoch_losses["loss_pl2pl_epoch"]),
-                                  step=dataset_index)
-                mlflow.log_metric("visible pixels", float(epoch_losses["visible_pixels_epoch"]),
-                                  step=dataset_index)
+                mlflow.log_metric("st", float(epoch_losses["st_epoch"]), step=dataset_index)
+                mlflow.log_metric("sq", float(epoch_losses["sq_epoch"]), step=dataset_index)
+                mlflow.log_metric("loss_t", float(epoch_losses["loss_t_epoch"]), step=dataset_index)
+                mlflow.log_metric("loss_q", float(epoch_losses["loss_q_epoch"]), step=dataset_index)

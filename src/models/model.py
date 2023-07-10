@@ -12,7 +12,7 @@ import torch
 
 import models.model_parts
 import models.resnet_modified
-
+import utility.projection
 
 class OdometryModel(torch.nn.Module):
 
@@ -21,9 +21,11 @@ class OdometryModel(torch.nn.Module):
 
         self.device = config["device"]
         self.config = config
+        self.batch_size = config["batch_size"]
         self.pre_feature_extraction = config["pre_feature_extraction"]
         in_channels = 8
         num_feature_extraction_layers = 5
+        self.img_projection = utility.projection.ImageProjectionLayer(config=config)
 
         print("Used activation function is: " + self.config["activation_fct"] + ".")
         if self.config["activation_fct"] != "relu" and self.config["activation_fct"] != "tanh":
@@ -102,8 +104,32 @@ class OdometryModel(torch.nn.Module):
         features = self.resnet(x)
 
         return features
-
-    def forward(self, image_1, image_2):
+    
+    def proj_image(self, input_scan, preprocessed_dicts):
+        # Use every batchindex separately
+        images_model = torch.zeros(self.batch_size, 4,
+                                     self.config[preprocessed_dicts[0]["dataset"]]["vertical_cells"],
+                                     self.config[preprocessed_dicts[0]["dataset"]]["horizontal_cells"],
+                                     device=self.device)
+        for index in range(0, self.batch_size):
+            # preprocessed_dict = self.augment_input(preprocessed_data=preprocessed_dict)
+            # Training / Testing
+            image_1, _, _, point_cloud_indices_1, _ = self.img_projection(
+                input=input_scan, dataset=preprocessed_dicts[0]["dataset"])
+            image_model = image_1[0]
+            
+            proj_xyz = input_scan[:, :, point_cloud_indices_1]
+            # Write projected image to batch
+            images_model[index] = image_model
+        # print("priject point mun = ", proj_xyz.shape[2])
+        return images_model, proj_xyz
+    
+    def forward(self, preprocessed_dicts):
+        origin_xyz_l1 = preprocessed_dicts[0]["scan_1"]
+        origin_xyz_l2= preprocessed_dicts[0]["scan_2"]
+        
+        image_1, _ = self.proj_image(origin_xyz_l1, preprocessed_dicts)
+        image_2, _ = self.proj_image(origin_xyz_l2, preprocessed_dicts)
         x = self.forward_features(image_1=image_1, image_2=image_2)
         x = x[-1]
         if self.config["use_single_mlp_at_output"]:
@@ -115,8 +141,7 @@ class OdometryModel(torch.nn.Module):
             x_translation = self.fully_connected_translation(x)
 
         x_rotation = x_rotation / torch.norm(x_rotation)
-
-        return (x_translation, x_rotation)
+        return (x_rotation.unsqueeze(0)), (x_translation.unsqueeze(0))
 
 if __name__ == '__main__':
     from thop import profile

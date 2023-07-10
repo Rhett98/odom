@@ -20,8 +20,14 @@ class Trainer(deploy.deployer.Deployer):
     def __init__(self, config):
         super(Trainer, self).__init__(config=config)
         self.training_bool = True
-        self.optimizer = torch.optim.Adam(params=self.model.parameters(),
+        # self.optimizer = torch.optim.Adam(params=self.model.parameters(),
+        #                                   lr=self.config["learning_rate"])
+        self.optimizer = torch.optim.Adam([{'params': self.model.parameters()},
+                                           {'params': self.lossTransformation.parameters(),'lr': 0.0001}],
                                           lr=self.config["learning_rate"])
+        # self.optimizer = torch.optim.Adam(filter(lambda x: x.requires_grad, list(self.model.parameters()) \
+        #                                 + list(self.lossTransformation.parameters())),
+        #                                 lr=self.config["learning_rate"])
 
         # Load checkpoint
         if self.config["checkpoint"]:
@@ -44,14 +50,10 @@ class Trainer(deploy.deployer.Deployer):
 
         epoch_losses = {
             "loss_epoch": 0.0,
-            "loss_point_cloud_epoch": 0.0,
-            "loss_field_of_view_epoch": 0.0,
-            "loss_po2po_epoch": 0.0,
-            "loss_po2pl_epoch": 0.0,
-            "loss_pl2pl_epoch": 0.0,
-            "visible_pixels_epoch": 0.0,
-            "loss_yaw_pitch_roll_epoch": np.zeros(3),
-            "loss_true_trafo_epoch": 0.0,
+            "st_epoch": 0.0,
+            "sq_epoch": 0.0,
+            "loss_t_epoch": 0.0,
+            "loss_q_epoch": 0.0,
         }
         counter = 0
 
@@ -118,21 +120,26 @@ class Trainer(deploy.deployer.Deployer):
 
                 # Compute metrics
                 epoch_losses["loss_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_point_cloud_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_po2po_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_po2pl_epoch"] /= self.steps_per_epoch
-                epoch_losses["loss_pl2pl_epoch"] /= self.steps_per_epoch
-                epoch_losses["visible_pixels_epoch"] /= self.steps_per_epoch
+                epoch_losses["st_epoch"] /= self.steps_per_epoch
+                epoch_losses["sq_epoch"] /= self.steps_per_epoch
+                epoch_losses["loss_t_epoch"] /= self.steps_per_epoch
+                epoch_losses["loss_q_epoch"] /= self.steps_per_epoch
 
                 # Print update
                 print("--------------------------")
                 print("Epoch Summary: " + format(epoch, '05d') + ", loss: " + str(
-                    epoch_losses["loss_epoch"]))
+                    epoch_losses["loss_epoch"])+ ", loss_q: " + str(
+                    epoch_losses["loss_q_epoch"])+ ", loss_t: " + str(
+                    epoch_losses["loss_t_epoch"]))
 
                 # Logging
                 print("Logging metrics and artifacts...")
                 # Log metrics
                 mlflow.log_metric("loss", float(epoch_losses["loss_epoch"]), step=epoch)
+                mlflow.log_metric("st", float(epoch_losses["st_epoch"]), step=epoch)
+                mlflow.log_metric("sq", float(epoch_losses["sq_epoch"]), step=epoch)
+                mlflow.log_metric("loss_t", float(epoch_losses["loss_t_epoch"]), step=epoch)
+                mlflow.log_metric("loss_q", float(epoch_losses["loss_q_epoch"]), step=epoch)
 
                 # Save latest checkpoint, and create checkpoint backup all 5 epochs
                 ## Every epoch --> will always be overwritten by latest version

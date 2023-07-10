@@ -36,7 +36,7 @@ class GeometryHandler:
     
     @staticmethod
     def get_quaternion_from_transformation_matrix(matrix):
-        rotation_matrix = torch.tensor(matrix[:, :3, :3])
+        rotation_matrix = matrix[:, :3, :3].clone().detach()
         # ,order=kornia.geometry.conversions.QuaternionCoeffOrder.WXYZ
         return kornia.geometry.conversions.rotation_matrix_to_quaternion(rotation_matrix)
 
