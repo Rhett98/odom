@@ -14,15 +14,15 @@ kitti: # must be the same as dataset name specified in deployment_options.yaml
   ## Deployment --------
   ### Training/testing configuration
   training_identifiers: [27]
-  testing_identifiers: [7]
+  testing_identifiers: [27]
   ### Sensor specs
   vertical_field_of_view: [ -23.5, 2.0 ]  # taken from the datasheet, in degrees
   vertical_cells: 64 # Number4of LiDAR rings
   horizontal_cells: 1024 # Can be defined, should not be larger than horizontal resolution of LiDAR
   ### Pre-processed file
-  preprocessed_path: "/home/yu/Resp/delora/datasets/kitti/preprocessed/sequences"
+  preprocessed_path: "/home/yu/Resp/dataset/sequences"
   ### Ground-truth poses
-  pose_data_path: "/home/yu/Resp/delora/datasets/kitti/data_odometry_poses/dataset/poses"
+  pose_data_path: "/home/yu/Resp/data_odometry_poses/dataset/poses"
 
   ## Pre-processing ----
   ### Dataset type, currently supported: "kitti" and "rosbag"

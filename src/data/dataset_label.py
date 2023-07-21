@@ -10,6 +10,7 @@ import os
 import torch
 import numpy as np
 from data.utils import load_poses, load_calib
+import utility.projection
 
 # Preprocessed point cloud dataset is invariant of source of data --> always same format
 # Data structure: dataset --> sequence --> scan
@@ -23,17 +24,28 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
         self.config = config
         # Store dataset in RAM
         self.store_dataset_in_RAM = self.config["store_dataset_in_RAM"]
-
+        
         # Members
         self.scans_files_in_datasets = []
+        self.labels_files_in_datasets = []
         num_sequences_in_datasets = np.zeros(len(self.config["datasets"]))
         num_scans_in_sequences_in_datasets = []
         num_scans_in_datasets = np.zeros(len(self.config["datasets"]))
+        
+        # init SemLaserScan
+        self.learning_map = self.config["learning_map"]
+        self.img_projection = utility.projection.ImageProjection(config)
+        # self.scan = SemLaserScan(project=True,
+        #                         H=self.config["kitti"]["horizontal_cells"],
+        #                         W=self.config["kitti"]["vertical_cells"],
+        #                         fov_up=self.config["horizontal_field_of_view"][1],
+        #                         fov_down=self.config["horizontal_field_of_view"][0])
 
         # Go through dataset(s) and create file lists
         for index_of_dataset, dataset in enumerate(self.config["datasets"]):
             ## Paths of sequences
             scans_files_in_sequences = []
+            labels_files_in_sequences = []
             num_scans_in_sequences = np.zeros(len(self.config[dataset]["data_identifiers"]), dtype=int)
             ## Go through sequences
             for index_of_sequence, data_identifier in enumerate(self.config[dataset]["data_identifiers"]):
@@ -44,10 +56,12 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
                                                                          format(data_identifier,
                                                                                 '02d') + "/") + "does not exist.")
                 name = os.path.join(self.config[dataset]["preprocessed_path"], format(data_identifier, '02d') + "/")
-                scans_name = os.path.join(name, "scans/")
+                scans_name = os.path.join(name, "velodyne/")
+                labels_name = os.path.join(name, "labels/")
 
                 # Files
-                scans_files_in_sequences.append(sorted(glob.glob(os.path.join(scans_name, '*.npy'))))
+                scans_files_in_sequences.append(sorted(glob.glob(os.path.join(scans_name, '*.bin'))))
+                labels_files_in_sequences.append(sorted(glob.glob(os.path.join(labels_name, '*.label'))))
                 # -1 is important (because looking at consecutive scans at t and t+1)
                 num_scans_in_sequences[index_of_sequence] = len(scans_files_in_sequences[index_of_sequence]) - 1
 
@@ -55,9 +69,9 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
             num_scans_in_sequences_in_datasets.append(num_scans_in_sequences)
             num_scans_in_datasets[index_of_dataset] = np.sum(num_scans_in_sequences, dtype=int)
             self.scans_files_in_datasets.append(scans_files_in_sequences)
+            self.labels_files_in_datasets.append(labels_files_in_sequences)
 
         self.num_scans_overall = np.sum(num_scans_in_datasets, dtype=int)
-
         # Dataset, sequence, scan indices (mapping overall_index --> dataset, sequence, scan-indices)
         self.indices_dataset = np.zeros(self.num_scans_overall, dtype=int)
         self.indices_sequence = np.zeros(self.num_scans_overall, dtype=int)
@@ -163,15 +177,52 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
                     self.indices_scan[counter] = index_scan
                     counter += 1
 
+    @staticmethod
+    def map(label, mapdict):
+        # put label from original values to xentropy
+        # or vice-versa, depending on dictionary values
+        # make learning map a lookup table
+        maxkey = 0
+        for key, data in mapdict.items():
+            if isinstance(data, list):
+                nel = len(data)
+            else:
+                nel = 1
+            if key > maxkey:
+                maxkey = key
+        # +100 hack making lut bigger just in case there are unknown labels
+        if nel > 1:
+            lut = np.zeros((maxkey + 100, nel), dtype=np.int32)
+        else:
+            lut = np.zeros((maxkey + 100), dtype=np.int32)
+        for key, data in mapdict.items():
+            try:
+                lut[key] = data
+            except IndexError:
+                print("Wrong key ", key)
+        # do the mapping
+        return lut[label]
+
     def load_files_from_disk(self, index_dataset, index_sequence, index_scan):
         scan = torch.from_numpy(
-            np.load(self.scans_files_in_datasets[index_dataset][index_sequence][index_scan])).to(
-            torch.device("cpu")).permute(1, 0).view(1, 3, -1)
-
-        return scan
+            np.fromfile(self.scans_files_in_datasets[index_dataset][index_sequence][index_scan],dtype=np.float32)).to(
+            torch.device("cpu")).view(-1 ,4)
+        # print(scan[0,:])
+        # print(scan[1,:])
+        # print(scan[2,:])
+        # delete zero point
+        # print(scan.shape)
+        # indices_non_zero = (scan[:, 0] != 0) & (scan[:, 1] != 0) & (scan[:, 2] != 0)
+        # scan = scan[indices_non_zero]    
+        # print("after", scan.shape)
+        return scan.permute(1,0)
+    
+    def load_label_from_disk(self, index_dataset, index_sequence, index_scan):
+        label = np.fromfile(self.labels_files_in_datasets[index_dataset][index_sequence][index_scan],\
+                            dtype=np.int32).reshape((-1))& 0xFFFF
+        return label
 
     def return_translations(self, index_of_dataset, index_of_sequence):
-        print(self.poses_datasets[index_of_dataset][index_of_sequence][0, 0])
         if not np.isnan(self.poses_datasets[index_of_dataset][index_of_sequence][0, 0]):
             return self.poses_datasets[index_of_dataset][index_of_sequence][:, [3, 7, 11]]
         else:
@@ -191,6 +242,7 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
         if self.store_dataset_in_RAM:
             scan_1 = self.scans_RAM[index_dataset][index_sequence][index_scan]
             scan_2 = self.scans_RAM[index_dataset][index_sequence][index_scan + 1]
+            ## TODO: load label to RAM
         else:
             scan_1 = self.load_files_from_disk(index_dataset=index_dataset,
                                                 index_sequence=index_sequence,
@@ -198,6 +250,15 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
             scan_2 = self.load_files_from_disk(index_dataset=index_dataset,
                                                 index_sequence=index_sequence,
                                                 index_scan=index_scan + 1)
+            label_1 = self.load_label_from_disk(index_dataset=index_dataset,
+                                                index_sequence=index_sequence,
+                                                index_scan=index_scan )
+            label_2 = self.load_label_from_disk(index_dataset=index_dataset,
+                                                index_sequence=index_sequence,
+                                                index_scan=index_scan + 1)
+            
+            _,_,_, proj_label_1 = self.img_projection.do_spherical_projection(scan_1, self.map(label_1, self.learning_map))
+            _,_,_, proj_label_2 = self.img_projection.do_spherical_projection(scan_2, self.map(label_2, self.learning_map))
             
         if not np.isnan(self.poses_datasets[index_dataset][index_sequence][index_scan, 0]):
             pose0 =  self.poses_datasets[index_dataset][index_sequence][index_scan].reshape(3, 4)
@@ -218,6 +279,8 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
             "dataset": self.config["datasets"][index_dataset],
             "scan_1": scan_1,
             "scan_2": scan_2,
+            "proj_label_1": proj_label_1,
+            "proj_label_2": proj_label_2,
             "pose": matrix,
         }
         return preprocessed_data
@@ -319,15 +382,20 @@ class PoseDataset(torch.utils.data.dataset.Dataset):
         return self.num_scans_overall
 
 if __name__ == '__main__':
-    
+    import utility.projection
     import yaml
-    config = yaml.safe_load(open('/home/yu/Resp/odom/config/config_datasets.yaml', 'r'))
+    import losses.segment_losses
+    config = yaml.safe_load(open('/home/yu/Resp/odom/config/config_datasets_test.yaml', 'r'))
     a = yaml.safe_load(open('/home/yu/Resp/odom/config/deployment_options.yaml', 'r'))
     config.update(a)
+    f = open('config/semantic-kitti-mos.yaml')
+    sematic_options = yaml.load(f, Loader=yaml.FullLoader)
+    config.update(sematic_options)
     b = yaml.safe_load(open('/home/yu/Resp/odom/config/hyperparameters.yaml', 'r'))
     config.update(b)
     dataset = "kitti"
     config[dataset]["data_identifiers"] = config[dataset]["training_identifiers"]
+    img_projection = utility.projection.ImageProjection(config)
     DATASET = PreprocessedPointCloudDataset(config)
     dataloader = torch.utils.data.DataLoader(dataset=DATASET,
                                                  batch_size=1,
@@ -335,4 +403,10 @@ if __name__ == '__main__':
                                                  num_workers=0,
                                                  pin_memory=False)
     for preprocessed_dicts in dataloader:
+        # print("scan:", preprocessed_dicts)
         print("scan:", preprocessed_dicts["scan_1"].shape)
+        print("label:", preprocessed_dicts["proj_label_1"].shape)
+        # img = img_projection.do_spherical_projection(preprocessed_dicts["scan_1"][0,:,:])
+        # print(img[0].shape,img[1].shape,img[2].shape)
+        # print(img[0])
+    # loss = losses.segment_losses.SegmentLoss(config)

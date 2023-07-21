@@ -23,7 +23,7 @@ def yes_or_no(question):
 
 def config():
     # Load parameters
-    f = open('config/config_datasets.yaml')
+    f = open('config/config_datasets_test.yaml')
     config = yaml.load(f, Loader=yaml.FullLoader)
     f = open('config/deployment_options.yaml')
     deployment_options = yaml.load(f, Loader=yaml.FullLoader)

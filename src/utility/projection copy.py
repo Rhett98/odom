@@ -9,6 +9,7 @@ import numba
 
 
 class ImageProjectionLayer(torch.nn.Module):
+
     def __init__(self, config):
         super(ImageProjectionLayer, self).__init__()
         self.device = config["device"]
@@ -111,14 +112,15 @@ class ImageProjectionLayer(torch.nn.Module):
     def forward(self, input, dataset):
         return self.project_to_img(point_cloud=input, dataset=dataset)
     
+    
 class ImageProjection():
     def __init__(self, config):
         super(ImageProjection, self).__init__()
         self.device = config["device"]
         self.config = config
         self.horizontal_field_of_view = config["horizontal_field_of_view"]
-        self.proj_H = self.config["kitti"]["vertical_cells"]
-        self.proj_W = self.config["kitti"]["horizontal_cells"]
+        self.proj_W = self.config["kitti"]["vertical_cells"]
+        self.proj_H = self.config["kitti"]["horizontal_cells"]
         self.proj_fov_down = self.horizontal_field_of_view[0]
         self.proj_fov_up = self.horizontal_field_of_view[1]
         
@@ -128,18 +130,14 @@ class ImageProjection():
             if the value of the constructor was not set (in case you change your
             mind about wanting the projection)
         """
-        D, N = in_scan.shape
         # conver torch.Tensor to numpy.ndarray
-        in_scan = in_scan.cpu().permute(1,0).detach().numpy()
+        in_scan = in_scan.permute(1,0).numpy()
         self.points = in_scan[:, :3]
-        # print(self.points.shape)
-        if D == 4:
-            self.remissions = in_scan[:, 3]
-        else:
-            self.remissions = np.full((self.points.shape[0]), 0, dtype=np.float32)  # [m ,1]: remission
-        # print(self.remissions.shape)
+        self.remissions = in_scan[:, 3]
+        
         """ Reset scan members. """
         # self.points = np.zeros((0, 3), dtype=np.float32)  # [m, 3]: x, y, z
+        # self.remissions = np.zeros((0, 1), dtype=np.float32)  # [m ,1]: remission
 
         # projected range image - [H,W] range (-1 is no data)
         self.proj_range = np.full((self.proj_H, self.proj_W), 0, dtype=np.float32)
@@ -173,7 +171,6 @@ class ImageProjection():
         depth = np.linalg.norm(self.points, 2, axis=1)
         # delete error point
         valid_indice = depth > 0.0
-        # print(valid_indice.shape)
         depth = depth[valid_indice]
         
         # get scan components

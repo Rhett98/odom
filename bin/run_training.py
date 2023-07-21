@@ -19,8 +19,11 @@ import deploy.trainer
 @click.option('--checkpoint', help='Path to the saved checkpoint. Leave empty if none.',
               default="")
 def config(training_run_name, experiment_name, checkpoint):
-    f = open('config/config_datasets.yaml')
+    f = open('config/config_datasets_change.yaml')
     config = yaml.load(f, Loader=yaml.FullLoader)
+    f = open('config/semantic-kitti-mos.yaml')
+    sematic_options = yaml.load(f, Loader=yaml.FullLoader)
+    config.update(sematic_options)
     f = open('config/deployment_options.yaml')
     deployment_options = yaml.load(f, Loader=yaml.FullLoader)
     config.update(deployment_options)
@@ -44,27 +47,27 @@ def config(training_run_name, experiment_name, checkpoint):
             print("Checkpoint does not contain any parameters. Using those ones specified in the YAML files.")
 
     # Parameters that are set depending on whether provided in checkpoint
-    if parameters_exist:
-        loaded_config = torch.load(checkpoint)['parameters']
-        ## Device to be used
-        loaded_config["device"] = torch.device(config["device"])
-        loaded_config["datasets"] = config["datasets"]
-        for dataset in loaded_config["datasets"]:
-            loaded_config[dataset]["training_identifiers"] = config[dataset]["training_identifiers"]
-            loaded_config[dataset]["data_identifiers"] = loaded_config[dataset]["training_identifiers"]
-        config = loaded_config
-    # Some parameters are only initialized when not taken from checkpoint
-    else:
-        ## Device to be used
-        config["device"] = torch.device(config["device"])
-        for dataset in config["datasets"]:
-            config[dataset]["data_identifiers"] = config[dataset]["training_identifiers"]
-        ## Convert angles to radians
-        for dataset in config["datasets"]:
-            config[dataset]["vertical_field_of_view"][0] *= (np.pi / 180.0)
-            config[dataset]["vertical_field_of_view"][1] *= (np.pi / 180.0)
-        config["horizontal_field_of_view"][0] *= (np.pi / 180.0)
-        config["horizontal_field_of_view"][1] *= (np.pi / 180.0)
+    # if parameters_exist:
+    #     loaded_config = torch.load(checkpoint)['parameters']
+    #     ## Device to be used
+    #     loaded_config["device"] = torch.device(config["device"])
+    #     loaded_config["datasets"] = config["datasets"]
+    #     for dataset in loaded_config["datasets"]:
+    #         loaded_config[dataset]["training_identifiers"] = config[dataset]["training_identifiers"]
+    #         loaded_config[dataset]["data_identifiers"] = loaded_config[dataset]["training_identifiers"]
+    #     config = loaded_config
+    # # Some parameters are only initialized when not taken from checkpoint
+    # else:
+    ## Device to be used
+    config["device"] = torch.device(config["device"])
+    for dataset in config["datasets"]:
+        config[dataset]["data_identifiers"] = config[dataset]["training_identifiers"]
+    ## Convert angles to radians
+    for dataset in config["datasets"]:
+        config[dataset]["vertical_field_of_view"][0] *= (np.pi / 180.0)
+        config[dataset]["vertical_field_of_view"][1] *= (np.pi / 180.0)
+    config["horizontal_field_of_view"][0] *= (np.pi / 180.0)
+    config["horizontal_field_of_view"][1] *= (np.pi / 180.0)
 
     # Parameters that are always set
     if checkpoint:

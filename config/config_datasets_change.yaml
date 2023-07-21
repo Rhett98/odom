@@ -13,22 +13,22 @@ epsilon_range: 0.5 # Epsilon when points are removed from patch used for normal 
 kitti: # must be the same as dataset name specified in deployment_options.yaml
   ## Deployment --------
   ### Training/testing configuration
-  training_identifiers: [27]
+  training_identifiers: [7]
   testing_identifiers: [7]
   ### Sensor specs
   vertical_field_of_view: [ -23.5, 2.0 ]  # taken from the datasheet, in degrees
   vertical_cells: 64 # Number4of LiDAR rings
   horizontal_cells: 1024 # Can be defined, should not be larger than horizontal resolution of LiDAR
   ### Pre-processed file
-  preprocessed_path: "/home/yu/Resp/delora/datasets/kitti/preprocessed/sequences"
+  preprocessed_path: "/home/yu/Resp/dataset/sequences"
   ### Ground-truth poses
-  pose_data_path: "/home/yu/Resp/delora/datasets/kitti/data_odometry_poses/dataset/poses"
+  pose_data_path: "/home/yu/Resp/data_odometry_poses/dataset/poses"
 
   ## Pre-processing ----
   ### Dataset type, currently supported: "kitti" and "rosbag"
   dataset_type: "kitti"
   ### Specific configurations needed for pre-processing
-  horizontal_cells_preprocessing: 1024 # Calculated from 10Hz frequency of LiDAR
+  horizontal_cells_preprocessing: 2250 # Calculated from 10Hz frequency of LiDAR
   ### Preprocessing hyperparameters
   neighborhood_side_length: [ 7, 11 ] # Patch dimensions used for normal estimation
   ### Source files (before pre-processing)

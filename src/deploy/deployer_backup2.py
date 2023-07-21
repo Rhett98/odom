@@ -16,7 +16,7 @@ import utility.projection
 import data.dataset
 # import models.model
 import models.model_modified
-import losses.icp_losses
+import losses.motion_losses
 import models.pwclo
 
 # from utility.geometry import euler_to_quaternion, quaternion_to_euler
@@ -59,8 +59,10 @@ class Deployer(object):
 
         # Loss and optimizer
         # self.lossTransformation = torch.nn.MSELoss()
-        self.lossTransformation = losses.icp_losses.supervisedLosses()
-        self.lossPointCloud = losses.icp_losses.ICPLosses(config=self.config)
+        # self.lossTransformation = losses.icp_losses.supervisedLosses().to(self.device)
+        self.lossTransformation = losses.motion_losses.UncertaintyLoss().to(self.device)
+        # self.lossTransformation = losses.icp_losses.GeometricLoss().to(self.device)
+        # self.lossPointCloud = losses.icp_losses.ICPLosses(config=self.config)
         # self.lossBCE = torch.nn.BCELoss()
         self.training_bool = False
 
@@ -266,9 +268,10 @@ class Deployer(object):
             preprocessed_dict["scan_1"] = preprocessed_dict["scan_1"][:, :, point_cloud_indices_1]
             preprocessed_dict["scan_2"] = preprocessed_dict["scan_2"][:, :, point_cloud_indices_2]
             
+            # supervised label
             target_transformation = torch.tensor(preprocessed_dict["pose"]).unsqueeze(0).cuda().float()   
-            target_euler = self.geometry_handler.get_euler_angles_from_matrix(target_transformation, device=self.device)
-            target_trans = target_transformation[0,:3,3]
+            target_q = self.geometry_handler.get_quaternion_from_transformation_matrix(target_transformation)
+            target_t = target_transformation[:,:3,3]
 
             image_model_1 = image_1[0]
             image_model_2 = image_2[0]
@@ -277,36 +280,63 @@ class Deployer(object):
             images_model_1[index] = image_model_1
             images_model_2[index] = image_model_2
             images_to_pcs_indices_2 = [image_to_pc_indices_2]
+            
         self.log_img_1 = image_1[:, :3]
         self.log_img_2 = image_2[:, :3]
 
         # Feed into model as batch
-        (translations, rotation_representation) = self.model(images_model_1,
-                                                             images_model_2)
+        # (translations, rotation_representation) = self.model(images_model_1, images_model_2)
+        det_q, det_t = self.model(preprocessed_dicts)
         
         computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
-            translation=translations, quaternion=rotation_representation, device=self.device)
-        
-        computed_euler = self.geometry_handler.get_euler_angles_from_matrix(computed_transformations, device=self.device)
-        computed_trans = computed_transformations[0,:3,3]
-
+            translation=det_t[-1], quaternion=det_q[-1], device=self.device)
+        # computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
+        #     translation=det_t, quaternion=det_q, device=self.device)
+        # print(computed_transformations)
+        # print("*************")
         # Following part only done when loss needs to be computed
         if not self.config["inference_only"]:
+            # Iterate through all transformations and compute loss
+            # losses = {
+            #     "loss_epoch": torch.zeros(1, device=self.device),
+            #     "loss_po2po": torch.zeros(1, device=self.device),
+            #     "loss_po2pl": torch.zeros(1, device=self.device),
+            #     "loss_po2pl_pointwise": torch.zeros(1, device=self.device),
+            #     "loss_pl2pl": torch.zeros(1, device=self.device),
+            # }
             ## Losses
-            loss_transformation = self.lossTransformation(target_euler, computed_euler, target_trans, computed_trans)
-
-            loss_transformation /= self.batch_size
-            loss = loss_transformation  # Overwrite loss for identity fitting
+            loss_transformation = self.lossTransformation(target_q, det_q, target_t, det_t)
+            loss = loss_transformation["loss"]/self.batch_size  # Overwrite loss for identity fitting
 
             if self.training_bool:
+                # print("=============更新之前===========")
+                # for name, parms in self.lossTransformation.named_parameters():	
+                #     print('-->name:', name)
+                #     print('-->para:', parms)
+                #     # print('-->grad_requirs:',parms.requires_grad)
+                #     print('-->grad_value:',parms.grad)
+                #     print("===")
+                # # print(self.optimizer)
                 loss.backward()
                 self.optimizer.step()
+                # print("=============更新之后===========")
+                # for name, parms in self.lossTransformation.named_parameters():	
+                #     print('-->name:', name)
+                #     print('-->para:', parms)
+                #     # print('-->grad_requirs:',parms.requires_grad)
+                #     print('-->grad_value:',parms.grad)
+                #     print("===")
+                # print(self.optimizer.state_dict()['param_groups'])
 
             if self.config["normalization_scaling"]:
                 for index, preprocessed_dict in enumerate(preprocessed_dicts):
                     computed_transformations[index, :3, 3] *= preprocessed_dict["scaling_factor"]
 
             epoch_losses["loss_epoch"] += loss.detach().cpu().numpy()
+            epoch_losses["st_epoch"] += loss_transformation["st"].detach().cpu().numpy()
+            epoch_losses["sq_epoch"] += loss_transformation["sq"].detach().cpu().numpy()
+            epoch_losses["loss_t_epoch"] += loss_transformation["loss_t"].detach().cpu().numpy()
+            epoch_losses["loss_q_epoch"] += loss_transformation["loss_q"].detach().cpu().numpy()
 
             return epoch_losses, computed_transformations
         else:

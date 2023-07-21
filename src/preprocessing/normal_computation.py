@@ -28,16 +28,17 @@ class NormalsComputer:
         self.dataset_name = dataset_name
 
     def get_image_coords(self, image):
+        print(image[0, :3, ].shape)
         # Target list is extracted from target image (visible points)
         list = image[0, :3, ].view(
             3, self.config[self.dataset_name]["vertical_cells"] * self.config[self.dataset_name][
                 "horizontal_cells"]).transpose(0, 1)
+
         indices_non_zero = (list[:, 0] != 0) & (list[:, 1] != 0) & (list[:, 2] != 0)
         list = list[indices_non_zero]
-
+        print(list.shape)
         u_image_coordinates_list = self.u_image_coords_list[indices_non_zero]
         v_image_coordinates_list = self.v_image_coords_list[indices_non_zero]
-
         return list, u_image_coordinates_list, v_image_coordinates_list
 
     def check_planarity(self, eigenvalues):
@@ -83,7 +84,6 @@ class NormalsComputer:
         # Now for all points which do not have a normal we simply store (0, 0, 0)^T
         all_normal_vectors_with_zeros = torch.zeros_like(point_locations)
         all_normal_vectors_with_zeros[where_enough_neighbors_bool] = all_normal_vectors
-
         return all_normal_vectors_with_zeros, where_enough_neighbors_bool, point_locations
 
     def compute_normal_vectors(self, image):

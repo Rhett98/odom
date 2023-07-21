@@ -4,13 +4,62 @@ import sys
 path = os.getcwd()
 sys.path.append(path)
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 import models.model_parts
 import models.resnet_modified
 import utility.projection
+from models.BaseBlocks import ResBlock, UpBlock,ResContextBlock
+
+class SalsaNext(nn.Module):
+    def __init__(self, nclasses=3, input_scan=2):
+        super(SalsaNext, self).__init__()
+        self.nclasses = nclasses
+        self.input_size = 5 * input_scan
+
+        print("Depth of backbone input = ", self.input_size)
+        ###
+        
+        self.downCntx = ResContextBlock(self.input_size, 32)
+        self.downCntx2 = ResContextBlock(32, 32)
+        self.downCntx3 = ResContextBlock(32, 32)
+
+        self.resBlock1 = ResBlock(32, 2 * 32, 0.2, pooling=True, drop_out=False)
+        self.resBlock2 = ResBlock(2 * 32, 2 * 2 * 32, 0.2, pooling=True)
+        self.resBlock3 = ResBlock(2 * 2 * 32, 2 * 4 * 32, 0.2, pooling=True)
+        self.resBlock4 = ResBlock(2 * 4 * 32, 2 * 4 * 32, 0.2, pooling=True)
+        self.resBlock5 = ResBlock(2 * 4 * 32, 2 * 4 * 32, 0.2, pooling=False)
+
+        self.upBlock1 = UpBlock(2 * 4 * 32, 4 * 32, 0.2)
+        self.upBlock2 = UpBlock(4 * 32, 4 * 32, 0.2)
+        self.upBlock3 = UpBlock(4 * 32, 2 * 32, 0.2)
+        self.upBlock4 = UpBlock(2 * 32, 32, 0.2, drop_out=False)
+         
+        self.logits = nn.Conv2d(32, nclasses, kernel_size=(1, 1))
+
+    def forward(self, x):
+        downCntx = self.downCntx(x)
+        downCntx = self.downCntx2(downCntx)
+        downCntx = self.downCntx3(downCntx)
+
+        down0c, down0b = self.resBlock1(downCntx)
+        down1c, down1b = self.resBlock2(down0c)
+        down2c, down2b = self.resBlock3(down1c)
+        down3c, down3b = self.resBlock4(down2c)
+        down5c = self.resBlock5(down3c)
+
+        up4e = self.upBlock1(down5c,down3b)
+        up3e = self.upBlock2(up4e, down2b)
+        up2e = self.upBlock3(up3e, down1b)
+        up1e = self.upBlock4(up2e, down0b)
+        logits = self.logits(up1e)
+
+        logits = logits
+        logits = F.softmax(logits, dim=1)
+        return logits
 
 class OdometryModel(torch.nn.Module):
-
     def __init__(self, config):
         super(OdometryModel, self).__init__()
 
@@ -20,7 +69,7 @@ class OdometryModel(torch.nn.Module):
         self.pre_feature_extraction = config["pre_feature_extraction"]
         in_channels = 8
         num_feature_extraction_layers = 5
-        self.img_projection = utility.projection.ImageProjectionLayer(config=config)
+        self.img_projection = utility.projection.ImageProjection(config=config)
 
         self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=(1, 2), padding=(1, 0))
 
@@ -137,23 +186,26 @@ class OdometryModel(torch.nn.Module):
         self.geometry_handler = models.model_parts.GeometryHandler(config=config)
     
     def proj_image(self, input_scan, preprocessed_dicts):
+        """project pointcloud to image coordinate
+        input_scan: (b, 4, n) or (b, 3, n) without remission
+        """
         # Use every batchindex separately
         images_model = torch.zeros(self.batch_size, 4,
                                      self.config[preprocessed_dicts[0]["dataset"]]["vertical_cells"],
                                      self.config[preprocessed_dicts[0]["dataset"]]["horizontal_cells"],
                                      device=self.device)
+        proj_xyz_model = torch.Tensor().to(self.device)
         for index in range(0, self.batch_size):
             # preprocessed_dict = self.augment_input(preprocessed_data=preprocessed_dict)
             # Training / Testing
-            image_1, _, _, point_cloud_indices_1, _ = self.img_projection(
-                input=input_scan, dataset=preprocessed_dicts[0]["dataset"])
-            image_model = image_1[0]
-            
-            proj_xyz = input_scan[:, :, point_cloud_indices_1]
+            image_range, image_xyz, image_remission = self.img_projection.do_spherical_projection(
+                input_scan[index])
+            # image_model = torch.cat([image_range, image_xyz, image_remission])
+            image_model = torch.cat([image_range, image_xyz])
             # Write projected image to batch
             images_model[index] = image_model
-        # print("priject point mun = ", proj_xyz.shape[2])
-        return images_model, proj_xyz
+            proj_xyz_model = image_xyz.view(1, 3, -1).to(self.device)
+        return images_model, proj_xyz_model
     
     def warp_pointcloud(self, pc_xyz, translation, rotation):
         inv_q = models.model_parts.inv_q(rotation)
@@ -185,15 +237,14 @@ class OdometryModel(torch.nn.Module):
         return x
     
     def forward(self, preprocessed_dicts):
-        origin_xyz_l1 = preprocessed_dicts[0]["scan_1"]
-        origin_xyz_l2= preprocessed_dicts[0]["scan_2"]
+        # xyzr_1 = preprocessed_dicts[0]["scan_1"]
+        # xyzr_2= preprocessed_dicts[0]["scan_2"]
+        # print(preprocessed_dicts[0]["scan_1"].shape)
+        xyz_1 = preprocessed_dicts[0]["scan_1"][:3, :].unsqueeze(0)
+        xyz_2 = preprocessed_dicts[0]["scan_2"][:3, :].unsqueeze(0)
         
-        image_1, proj_xyz_1 = self.proj_image(origin_xyz_l1, preprocessed_dicts)
-        image_2, _ = self.proj_image(origin_xyz_l2, preprocessed_dicts)
-        # image_1 = torch.nn.functional.pad(input=image_1, pad=(1, 1, 0, 0), mode='circular')
-        # image_1 = self.maxpool(image_1)
-        # image_2 = torch.nn.functional.pad(input=image_2, pad=(1, 1, 0, 0), mode='circular')
-        # image_2 = self.maxpool(image_2)
+        image_1, proj_point_1 = self.proj_image(xyz_1, preprocessed_dicts)
+        image_2, _ = self.proj_image(xyz_2, preprocessed_dicts)
         
         ### l1-layer ###
         features_l1 = self.resnet1(self.forward_features(image_1=image_1, image_2=image_2))
@@ -202,8 +253,8 @@ class OdometryModel(torch.nn.Module):
         l1_q = l1_q / torch.norm(l1_q)
         
         ### l2-layer ###
-        warp_xyz_1_l1 = self.warp_pointcloud(proj_xyz_1, l1_t, l1_q)
-        image_1_l2, _ = self.proj_image(warp_xyz_1_l1, preprocessed_dicts)
+        warp_xyz_1_l1 = self.warp_pointcloud(proj_point_1, l1_t, l1_q)
+        image_1_l2, _= self.proj_image(warp_xyz_1_l1, preprocessed_dicts)
         
         features_l2 = self.resnet2(self.forward_features(image_1=image_1_l2, image_2=image_2))
         l2_q_det = self.fully_connected_rotation2(features_l2)
@@ -213,7 +264,7 @@ class OdometryModel(torch.nn.Module):
         l2_q, l2_t = self.warp_det_result(l1_q, l1_t, l2_q_det, l2_t_det)
         
         ### l3-layer ###
-        warp_xyz_1_l2 = self.warp_pointcloud(proj_xyz_1, l2_t, l2_q)
+        warp_xyz_1_l2 = self.warp_pointcloud(proj_point_1, l2_t, l2_q)
         image_1_l3, _ = self.proj_image(warp_xyz_1_l2, preprocessed_dicts)
         
         features_l3 = self.resnet3(self.forward_features(image_1=image_1_l3, image_2=image_2))
@@ -224,7 +275,7 @@ class OdometryModel(torch.nn.Module):
         l3_q, l3_t = self.warp_det_result(l2_q, l2_t, l3_q_det, l3_t_det)
         
         ### l4-layer ###
-        warp_xyz_1_l3 = self.warp_pointcloud(proj_xyz_1, l3_t, l3_q)
+        warp_xyz_1_l3 = self.warp_pointcloud(proj_point_1, l3_t, l3_q)
         image_1_l4, _ = self.proj_image(warp_xyz_1_l3, preprocessed_dicts)
         
         features_l4 = self.resnet4(self.forward_features(image_1=image_1_l4, image_2=image_2))
@@ -244,29 +295,34 @@ if __name__ == '__main__':
     config.update(a)
     b = yaml.safe_load(open('/home/yu/Resp/delora/config/hyperparameters.yaml', 'r'))
     config.update(b)
-    model = OdometryModel(config)
-    # fn = model.warp_pointcloud(torch.randn(1, 1000, 3 ),torch.randn(1, 3), torch.randn(1, 4))
-    # print(fn.shape)
-    # dummy_input = torch.randn(1, 4, 64, 720),torch.randn(1, 4, 64, 720)
-    # flops, params = profile(model, (dummy_input))
-    # print('flops: %.2f M, params: %.2f M' % (flops / 1000000.0, params / 1000000.0))
+    # model = OdometryModel(config)
+    # # fn = model.warp_pointcloud(torch.randn(1, 1000, 3 ),torch.randn(1, 3), torch.randn(1, 4))
+    # # print(fn.shape)
+    # # dummy_input = torch.randn(1, 4, 64, 720),torch.randn(1, 4, 64, 720)
+    # # flops, params = profile(model, (dummy_input))
+    # # print('flops: %.2f M, params: %.2f M' % (flops / 1000000.0, params / 1000000.0))
     
-    points = torch.tensor([[[1.0], [2.0],[3.0]]])  
-    quaternions = torch.tensor([[0.0, 0.707, 0.707, 0.0]])  
-    translations = torch.tensor([[1.0, 2.0, 3.0]])  
-    translations2 = torch.tensor([[0, 0, 0]]) 
-    transformed_points = model.warp_pointcloud(points, translations2, quaternions)
-    print("变换前的点:\n", points)
-    print("变换后的点:\n", transformed_points)
+    # points = torch.tensor([[[1.0], [2.0],[3.0]]])  
+    # quaternions = torch.tensor([[0.0, 0.707, 0.707, 0.0]])  
+    # translations = torch.tensor([[1.0, 2.0, 3.0]])  
+    # translations2 = torch.tensor([[0, 0, 0]]) 
+    # transformed_points = model.warp_pointcloud(points, translations2, quaternions)
+    # print("变换前的点:\n", points)
+    # print("变换后的点:\n", transformed_points)
     
-    import numpy as np
-    import quaternion
-    q1 = np.quaternion(0,1,2,3 )
-    q2 = np.quaternion(0.0, 0.707, 0.707, 0.0)
-    q2_ = np.quaternion(0.0, -0.707, -0.707, 0.0)
-    q = q2*q1
-    print(q)
-    print(q*q2_)
+    # import numpy as np
+    # import quaternion
+    # q1 = np.quaternion(0,1,2,3 )
+    # q2 = np.quaternion(0.0, 0.707, 0.707, 0.0)
+    # q2_ = np.quaternion(0.0, -0.707, -0.707, 0.0)
+    # q = q2*q1
+    # print(q)
+    # print(q*q2_)
+    
+    model = SalsaNext(3,2)
+    input = torch.randn(1,10,64,2048)
+    out = model(input)
+    print(out)
 
 
     
