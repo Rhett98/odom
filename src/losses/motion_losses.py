@@ -74,8 +74,8 @@ class UncertaintyLoss(torch.nn.Module):
             loss_t0 += weights[i] * self.loss_t(target_t[:,0], det_t[i][:,0])  
             loss_t1 += weights[i] * self.loss_t(target_t[:,1], det_t[i][:,1])
             loss_t2 += weights[i] * self.loss_t(target_t[:,2], det_t[i][:,2])
-        print(loss_q0, loss_q1, loss_q2, loss_q3)
-        print(loss_t0, loss_t1, loss_t2)
+        # print(loss_q0, loss_q1, loss_q2, loss_q3)
+        # print(loss_t0, loss_t1, loss_t2)
         loss = torch.exp(-self.sigma[0])*loss_q0 + self.sigma[0] +\
                     torch.exp(-self.sigma[1])*loss_q1 + self.sigma[1] +\
                     torch.exp(-self.sigma[2])*loss_q2 + self.sigma[2] +\
