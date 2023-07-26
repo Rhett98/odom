@@ -207,14 +207,6 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
         scan = torch.from_numpy(
             np.fromfile(self.scans_files_in_datasets[index_dataset][index_sequence][index_scan],dtype=np.float32)).to(
             torch.device("cpu")).view(-1 ,4)
-        # print(scan[0,:])
-        # print(scan[1,:])
-        # print(scan[2,:])
-        # delete zero point
-        # print(scan.shape)
-        # indices_non_zero = (scan[:, 0] != 0) & (scan[:, 1] != 0) & (scan[:, 2] != 0)
-        # scan = scan[indices_non_zero]    
-        # print("after", scan.shape)
         return scan.permute(1,0)
     
     def load_label_from_disk(self, index_dataset, index_sequence, index_scan):

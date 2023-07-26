@@ -54,6 +54,7 @@ class Trainer(deploy.deployer.Deployer):
             "sq_epoch": 0.0,
             "loss_t_epoch": 0.0,
             "loss_q_epoch": 0.0,
+            "seg_epoch": 0.0,
         }
         counter = 0
 
@@ -124,13 +125,15 @@ class Trainer(deploy.deployer.Deployer):
                 epoch_losses["sq_epoch"] /= self.steps_per_epoch
                 epoch_losses["loss_t_epoch"] /= self.steps_per_epoch
                 epoch_losses["loss_q_epoch"] /= self.steps_per_epoch
+                epoch_losses["seg_epoch"] /= self.steps_per_epoch
 
                 # Print update
                 print("--------------------------")
                 print("Epoch Summary: " + format(epoch, '05d') + ", loss: " + str(
                     epoch_losses["loss_epoch"])+ ", loss_q: " + str(
                     epoch_losses["loss_q_epoch"])+ ", loss_t: " + str(
-                    epoch_losses["loss_t_epoch"]))
+                    epoch_losses["loss_t_epoch"])+ ", loss_seg: " + str(
+                    epoch_losses["seg_epoch"]))
 
                 # Logging
                 print("Logging metrics and artifacts...")
@@ -140,6 +143,7 @@ class Trainer(deploy.deployer.Deployer):
                 mlflow.log_metric("sq", float(epoch_losses["sq_epoch"]), step=epoch)
                 mlflow.log_metric("loss_t", float(epoch_losses["loss_t_epoch"]), step=epoch)
                 mlflow.log_metric("loss_q", float(epoch_losses["loss_q_epoch"]), step=epoch)
+                mlflow.log_metric("seg", float(epoch_losses["seg_epoch"]), step=epoch)
 
                 # Save latest checkpoint, and create checkpoint backup all 5 epochs
                 ## Every epoch --> will always be overwritten by latest version

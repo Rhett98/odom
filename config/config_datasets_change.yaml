@@ -13,8 +13,8 @@ epsilon_range: 0.5 # Epsilon when points are removed from patch used for normal 
 kitti: # must be the same as dataset name specified in deployment_options.yaml
   ## Deployment --------
   ### Training/testing configuration
-  training_identifiers: [7]
-  testing_identifiers: [7]
+  training_identifiers: [1]
+  testing_identifiers: [1]
   ### Sensor specs
   vertical_field_of_view: [ -23.5, 2.0 ]  # taken from the datasheet, in degrees
   vertical_cells: 64 # Number4of LiDAR rings

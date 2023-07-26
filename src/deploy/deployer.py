@@ -61,7 +61,7 @@ class Deployer(object):
 
         # Loss and optimizer
         self.lossTransformation = losses.motion_losses.UncertaintyLoss().to(self.device)
-        # self.lossSegmentation = losses.segment_losses.SegmentLoss(config=config).to(self.device)
+        self.lossSegmentation = losses.segment_losses.SegmentLoss(config=config).to(self.device)
         # self.lossTransformation = losses.icp_losses.GeometricLoss().to(self.device)
 
         self.training_bool = False
@@ -288,27 +288,19 @@ class Deployer(object):
 
         # Feed into model as batch
         # (translations, rotation_representation) = self.model(images_model_1, images_model_2)
-        det_q, det_t,  = self.model(preprocessed_dicts)
+        det_q, det_t, predict= self.model(preprocessed_dicts)
         
         computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
             translation=det_t[-1], quaternion=det_q[-1], device=self.device)
         # computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
         #     translation=det_t, quaternion=det_q, device=self.device)
-        # print(computed_transformations)
-        # print("*************")
+
         # Following part only done when loss needs to be computed
         if not self.config["inference_only"]:
-            # Iterate through all transformations and compute loss
-            # losses = {
-            #     "loss_epoch": torch.zeros(1, device=self.device),
-            #     "loss_po2po": torch.zeros(1, device=self.device),
-            #     "loss_po2pl": torch.zeros(1, device=self.device),
-            #     "loss_po2pl_pointwise": torch.zeros(1, device=self.device),
-            #     "loss_pl2pl": torch.zeros(1, device=self.device),
-            # }
             ## Losses
+            loss_segmentation = self.lossSegmentation(torch.cat([preprocessed_dicts[0]["proj_label_1"],preprocessed_dicts[0]["proj_label_2"]]), predict)
             loss_transformation = self.lossTransformation(target_q, det_q, target_t, det_t)
-            loss = loss_transformation["loss"]/self.batch_size  # Overwrite loss for identity fitting
+            loss = loss_transformation["loss"]/self.batch_size + loss_segmentation/self.batch_size # Overwrite loss for identity fitting
 
             if self.training_bool:
                 # print("=============更新之前===========")
@@ -339,6 +331,7 @@ class Deployer(object):
             epoch_losses["sq_epoch"] += loss_transformation["sq"].detach().cpu().numpy()
             epoch_losses["loss_t_epoch"] += loss_transformation["loss_t"].detach().cpu().numpy()
             epoch_losses["loss_q_epoch"] += loss_transformation["loss_q"].detach().cpu().numpy()
+            epoch_losses["seg_epoch"] += loss_transformation.detach().cpu().numpy()
 
             return epoch_losses, computed_transformations
         else:
