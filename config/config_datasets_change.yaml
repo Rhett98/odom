@@ -20,9 +20,9 @@ kitti: # must be the same as dataset name specified in deployment_options.yaml
   vertical_cells: 64 # Number4of LiDAR rings
   horizontal_cells: 1024 # Can be defined, should not be larger than horizontal resolution of LiDAR
   ### Pre-processed file
-  preprocessed_path: "/home/yu/Resp/dataset/sequences"
+  preprocessed_path: "../dataset/sequences"
   ### Ground-truth poses
-  pose_data_path: "/home/yu/Resp/data_odometry_poses/dataset/poses"
+  pose_data_path: "../data_odometry_poses/dataset/poses"
 
   ## Pre-processing ----
   ### Dataset type, currently supported: "kitti" and "rosbag"
@@ -32,7 +32,7 @@ kitti: # must be the same as dataset name specified in deployment_options.yaml
   ### Preprocessing hyperparameters
   neighborhood_side_length: [ 7, 11 ] # Patch dimensions used for normal estimation
   ### Source files (before pre-processing)
-  data_path: "/home/yu/Resp/dataset/sequences" # Path to dataset
+  data_path: "../dataset/sequences" # Path to dataset
   rosbag_path: "./datasets/kitti/rosbags/" # Only needed when converted to rosbag
 
 # DARPA --------------------------------------

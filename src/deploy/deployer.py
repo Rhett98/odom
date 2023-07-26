@@ -331,7 +331,7 @@ class Deployer(object):
             epoch_losses["sq_epoch"] += loss_transformation["sq"].detach().cpu().numpy()
             epoch_losses["loss_t_epoch"] += loss_transformation["loss_t"].detach().cpu().numpy()
             epoch_losses["loss_q_epoch"] += loss_transformation["loss_q"].detach().cpu().numpy()
-            epoch_losses["seg_epoch"] += loss_transformation.detach().cpu().numpy()
+            epoch_losses["seg_epoch"] += loss_segmentation.detach().cpu().numpy()
 
             return epoch_losses, computed_transformations
         else:
