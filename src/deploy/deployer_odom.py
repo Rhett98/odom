@@ -1,11 +1,4 @@
-#!/usr/bin/env python3
-# Copyright 2021 by Julian Nubert, Robotic Systems Lab, ETH Zurich.
-# All rights reserved.
-# This file is released under the "BSD-3-Clause License".
-# Please see the LICENSE file that has been included as part of this package.
-import copy
 import math
-
 import torch
 import mlflow
 import numpy as np
@@ -13,14 +6,10 @@ import numpy as np
 import utility.plotting
 import utility.poses
 import utility.projection
-import data.dataset
-# import models.model
-import models.model_modified
+import data.dataset_label
+import models.refinement_model
 import losses.motion_losses
 import models.pwclo
-
-# from utility.geometry import euler_to_quaternion, quaternion_to_euler
-
 
 class Deployer(object):
 
@@ -31,39 +20,21 @@ class Deployer(object):
         self.config = config
         self.device = config["device"]
         self.batch_size = config["batch_size"]
-        self.dataset = data.dataset.PreprocessedPointCloudDataset(config=config)
+        self.dataset = data.dataset_label.PreprocessedPointCloudDataset(config=config)
         self.steps_per_epoch = int(len(self.dataset) / self.batch_size)
         if self.config["mode"] == "testing":
-            self.ground_truth_dataset = data.dataset.PoseDataset(config=self.config)
+            self.ground_truth_dataset = data.dataset_label.PoseDataset(config=self.config)
 
         # Projections and model
-        self.img_projection = utility.projection.ImageProjectionLayer(config=config)
-        if self.config["use_jit"]:
-            datasets = self.config["datasets"]
-            ## Need to provide example tensor for torch jit
-            example_tensor = torch.zeros((1, 4,
-                                          self.config[datasets[0]]["vertical_cells"],
-                                          self.config[datasets[0]]["horizontal_cells"]),
-                                         device=self.device)
-            del datasets
-            self.model = torch.jit.trace(
-                models.model.OdometryModel(config=self.config).to(self.device),
-                example_inputs=(example_tensor, example_tensor))
-        else:
-            # self.model = models.model.OdometryModel(config=self.config).to(self.device)
-            self.model = models.model_modified.OdometryModel(config=self.config).to(self.device)
-            # self.model = models.pwclo.OdometryModel().to(self.device)
+        self.img_projection = utility.projection.ImageProjection(config=config)
+        self.model = models.refinement_model.OdometryModel(config=self.config).to(self.device)
 
         # Geometry handler
         self.geometry_handler = models.model_parts.GeometryHandler(config=config)
 
         # Loss and optimizer
-        # self.lossTransformation = torch.nn.MSELoss()
-        # self.lossTransformation = losses.icp_losses.supervisedLosses().to(self.device)
         self.lossTransformation = losses.motion_losses.UncertaintyLoss().to(self.device)
-        # self.lossTransformation = losses.icp_losses.GeometricLoss().to(self.device)
-        # self.lossPointCloud = losses.icp_losses.ICPLosses(config=self.config)
-        # self.lossBCE = torch.nn.BCELoss()
+
         self.training_bool = False
 
         # Permanent variables for internal use
@@ -78,24 +49,6 @@ class Deployer(object):
     def list_collate(batch_dicts):
         data_dicts = [batch_dict for batch_dict in batch_dicts]
         return data_dicts
-
-    def create_images(self, preprocessed_data, losses, plotting):
-        ## Create image of target normals
-        image_1_at_normals, _, _, _, _ = self.img_projection(input=torch.cat((
-            preprocessed_data["scan_1"],
-            preprocessed_data["normal_list_1"]), dim=1), dataset=preprocessed_data["dataset"])
-
-        ## Create image for points where normals exist (in source and target)
-        image_2_transformed_and_normals_and_pointwise_loss, _, _, _, _ = \
-            self.img_projection(input=torch.cat((plotting["scan_2_transformed"],
-                                                 plotting["normals_2_transformed"],
-                                                 losses["loss_po2pl_pointwise"]), dim=1),
-                                dataset=preprocessed_data["dataset"])
-
-        self.log_pointwise_loss = image_2_transformed_and_normals_and_pointwise_loss[:, 6:9]
-        self.log_normals_target = image_1_at_normals[:, 3:6]
-        self.log_normals_transformed_source = image_2_transformed_and_normals_and_pointwise_loss[
-                                              :, 3:6]
 
     def log_image(self, epoch, string):
         utility.plotting.plot_lidar_image(
@@ -171,7 +124,6 @@ class Deployer(object):
             mlflow.log_param(dict_entry, self.config[dict_entry])
 
     def transform_image_to_point_cloud(self, transformation_matrix, image):
-        # print("image shape:", image.shape)
         point_cloud_transformed = torch.matmul(transformation_matrix[:, :3, :3],
                                                image[:, :3, :, :].view(-1, 3, image.shape[2] *
                                                                        image.shape[3]))
@@ -185,11 +137,10 @@ class Deployer(object):
                                             index_array_not_zero[batch_index]] + \
                                             transformation_matrix[batch_index, :3, 3].view(1, 3, -1)
         point_cloud_transformed = point_cloud_transformed_batch
-
         return point_cloud_transformed
 
     def rotate_point_cloud_transformation_matrix(self, transformation_matrix, point_cloud):
-        return transformation_matrix[:, :3, :3].matmul(point_cloud[:, :3, :])
+        return torch.matmul(transformation_matrix[:, :3, :3], point_cloud[:, :3, :])
 
     def transform_point_cloud_transformation_matrix(self, transformation_matrix, point_cloud):
         transformed_point_cloud = self.rotate_point_cloud_transformation_matrix(
@@ -206,28 +157,33 @@ class Deployer(object):
             euler=euler, device=self.device)
         return self.transform_point_cloud_transformation_matrix(
             transformation_matrix=transformation_matrix,
-            point_cloud=point_cloud)
+            point_cloud=point_cloud.unsqueeze(0))
+        
+    def rotate_transformation_matrix_vector(self, euler, origin_matrix):
+        translation = torch.zeros(3, device=self.device)
+        euler = euler.to(self.device)
+        transformation_matrix = self.geometry_handler.get_transformation_matrix_angle_axis(
+            translation=translation,
+            euler=euler, device=self.device)
+        return torch.matmul(origin_matrix, transformation_matrix.squeeze(0).double())
 
-    def augment_input(self, preprocessed_data):
+    def augment_input(self, scan, pose):
         # Random rotation
-        if self.config["random_point_cloud_rotations"]:
-            raise Exception("Needs to be verified for larger batches")
-            if self.config["random_rotations_only_yaw"]:
-                direction = torch.zeros((1, 3), device=self.device)
-                direction[0, 2] = 1
-            else:
-                direction = (torch.rand((1, 3), device=self.device))
-            direction = direction / torch.norm(direction)
-            magnitude = (torch.rand(1, device=self.device) - 0.5) * (
-                    self.config["magnitude_random_rot"] / 180.0 * torch.Tensor([math.pi]).to(
-                self.device))
-            euler = direction * magnitude
-            preprocessed_data["scan_2"] = self.rotate_point_cloud_euler_vector(
-                point_cloud=preprocessed_data["scan_2"], euler=euler)
-            preprocessed_data["normal_list_2"] = self.rotate_point_cloud_euler_vector(
-                point_cloud=preprocessed_data["normal_list_2"], euler=euler)
-
-        return preprocessed_data
+        if self.config["random_rotations_only_yaw"]:
+            direction = torch.zeros((1, 3), device=self.device)
+            direction[0, 2] = 1
+        else:
+            direction = (torch.rand((1, 3), device=self.device))
+        direction = direction / torch.norm(direction)
+        magnitude = (torch.rand(1, device=self.device) - 0.5) * (
+                self.config["magnitude_random_rot"] / 180.0 * torch.Tensor([math.pi]).to(
+            self.device))
+        euler = direction * magnitude
+        preprocess_scan = self.rotate_point_cloud_euler_vector(
+            point_cloud=scan, euler=euler)
+        preprocess_pose = self.rotate_transformation_matrix_vector(
+            origin_matrix=pose, euler=euler)
+        return preprocess_scan, preprocess_pose
 
     def normalize_input(self, preprocessed_data):
         ranges_1 = torch.norm(preprocessed_data["scan_1"], dim=1)
@@ -245,88 +201,60 @@ class Deployer(object):
         return preprocessed_data, normalization_mean
 
     def step(self, preprocessed_dicts, epoch_losses=None, log_images_bool=False):
-
+        batch_scan_1 = torch.zeros(self.batch_size, 3, self.config["kitti"]["max_points"], device=self.device)
+        batch_scan_2 = torch.zeros_like(batch_scan_1)
+        batch_target_q = torch.zeros(self.batch_size, 4, device=self.device)
+        batch_target_t = torch.zeros(self.batch_size, 3, device=self.device)
         # Use every batchindex separately
-        images_model_1 = torch.zeros(self.batch_size, 4,
-                                     self.config[preprocessed_dicts[0]["dataset"]]["vertical_cells"],
-                                     self.config[preprocessed_dicts[0]["dataset"]]["horizontal_cells"],
-                                     device=self.device)
-        images_model_2 = torch.zeros_like(images_model_1)
         for index, preprocessed_dict in enumerate(preprocessed_dicts):
-            if self.training_bool:
-                preprocessed_dict = self.augment_input(preprocessed_data=preprocessed_dict)
-            if self.config["normalization_scaling"]:
-                preprocessed_data, scaling_factor = self.normalize_input(preprocessed_data=preprocessed_dict)
+            # preprocess data
+            scan_1 = preprocessed_dict["scan_1"]
+            scan_2 = preprocessed_dict["scan_2"].to(self.device)
 
-            # Training / Testing
-            image_1, _, _, point_cloud_indices_1, _ = self.img_projection(
-                input=preprocessed_dict["scan_1"], dataset=preprocessed_dict["dataset"])
-            image_2, _, _, point_cloud_indices_2, image_to_pc_indices_2 = self.img_projection(
-                input=preprocessed_dict["scan_2"], dataset=preprocessed_dict["dataset"])
+            padded_scan_1 = torch.zeros((3, self.config["kitti"]["max_points"]), dtype=torch.float, device=self.device)
+            padded_scan_2 = torch.zeros((3, self.config["kitti"]["max_points"]), dtype=torch.float, device=self.device)
 
-            ## Only keep points that were projected to image
-            preprocessed_dict["scan_1"] = preprocessed_dict["scan_1"][:, :, point_cloud_indices_1]
-            preprocessed_dict["scan_2"] = preprocessed_dict["scan_2"][:, :, point_cloud_indices_2]
+            # 将原始点云复制到新的张量中，实现填充
+            padded_scan_1[:, :scan_1.shape[1]] = scan_1[:3, :]
+            padded_scan_2[:, :scan_2.shape[1]] = scan_2[:3, :]
             
-            # supervised label
-            target_transformation = torch.tensor(preprocessed_dict["pose"]).unsqueeze(0).cuda().float()   
-            target_q = self.geometry_handler.get_quaternion_from_transformation_matrix(target_transformation)
-            target_t = target_transformation[:,:3,3]
-
-            image_model_1 = image_1[0]
-            image_model_2 = image_2[0]
+            # if self.config["normalization_scaling"]:
+            #     preprocessed_data, scaling_factor = self.normalize_input(preprocessed_data=preprocessed_dict)
             
-            # Write projected image to batch
-            images_model_1[index] = image_model_1
-            images_model_2[index] = image_model_2
-            images_to_pcs_indices_2 = [image_to_pc_indices_2]
+            # augment rotation
+            if self.training_bool and self.config["random_point_cloud_rotations"]:
+                preprocessed_scan_2,  target_transformation = self.augment_input(padded_scan_2, 
+                                                    torch.tensor(preprocessed_dict["pose"]).to(self.device))
+                batch_scan_1[index] = padded_scan_1
+                batch_scan_2[index] = preprocessed_scan_2
+                
+            else:
+                batch_scan_1[index] = padded_scan_1
+                batch_scan_2[index] = padded_scan_2
+                target_transformation = torch.tensor(preprocessed_dict["pose"]).to(self.device)
             
-        self.log_img_1 = image_1[:, :3]
-        self.log_img_2 = image_2[:, :3]
-
+            # preprocess label
+            target_q = self.geometry_handler.get_quaternion_from_transformation_matrix(target_transformation.unsqueeze(0))
+            target_t = target_transformation[:3, 3]
+            batch_target_q[index] = target_q
+            batch_target_t[index] = target_t
+            
         # Feed into model as batch
         # (translations, rotation_representation) = self.model(images_model_1, images_model_2)
-        det_q, det_t = self.model(preprocessed_dicts)
+        det_q, det_t = self.model(batch_scan_1, batch_scan_2)
         
         computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
             translation=det_t[-1], quaternion=det_q[-1], device=self.device)
-        # computed_transformations = self.geometry_handler.get_transformation_matrix_quaternion(
-        #     translation=det_t, quaternion=det_q, device=self.device)
-        # print(computed_transformations)
-        # print("*************")
+
         # Following part only done when loss needs to be computed
         if not self.config["inference_only"]:
-            # Iterate through all transformations and compute loss
-            # losses = {
-            #     "loss_epoch": torch.zeros(1, device=self.device),
-            #     "loss_po2po": torch.zeros(1, device=self.device),
-            #     "loss_po2pl": torch.zeros(1, device=self.device),
-            #     "loss_po2pl_pointwise": torch.zeros(1, device=self.device),
-            #     "loss_pl2pl": torch.zeros(1, device=self.device),
-            # }
             ## Losses
-            loss_transformation = self.lossTransformation(target_q, det_q, target_t, det_t)
+            loss_transformation = self.lossTransformation(batch_target_q, det_q, batch_target_t, det_t)
             loss = loss_transformation["loss"]/self.batch_size  # Overwrite loss for identity fitting
 
             if self.training_bool:
-                # print("=============更新之前===========")
-                # for name, parms in self.lossTransformation.named_parameters():	
-                #     print('-->name:', name)
-                #     print('-->para:', parms)
-                #     # print('-->grad_requirs:',parms.requires_grad)
-                #     print('-->grad_value:',parms.grad)
-                #     print("===")
-                # # print(self.optimizer)
                 loss.backward()
                 self.optimizer.step()
-                # print("=============更新之后===========")
-                # for name, parms in self.lossTransformation.named_parameters():	
-                #     print('-->name:', name)
-                #     print('-->para:', parms)
-                #     # print('-->grad_requirs:',parms.requires_grad)
-                #     print('-->grad_value:',parms.grad)
-                #     print("===")
-                # print(self.optimizer.state_dict()['param_groups'])
 
             if self.config["normalization_scaling"]:
                 for index, preprocessed_dict in enumerate(preprocessed_dicts):
@@ -345,5 +273,28 @@ class Deployer(object):
                     computed_transformations[index, :3, 3] *= preprocessed_dict["scaling_factor"]
 
             return computed_transformations
+        
+if __name__ == '__main__':      
+    import torch
+
+    # 假设您有两个点云张量，分别是 points1 和 points2
+
+    # points1 是形状为 (1, N1, 3) 的点云张量
+    points1 = torch.tensor([[[1.0, 2.0, 3.0],
+                            [4.0, 5.0, 6.0]]])
+
+    # points2 是形状为 (1, N2, 3) 的点云张量
+    points2 = torch.tensor([[[7.0, 8.0, 9.0],
+                            [10.0, 11.0, 12.0],
+                            [13.0, 14.0, 15.0]]])
+
+    # 使用 torch.cat() 在第一个维度上进行拼接，合并两个点云
+    merged_points = torch.cat((points1, points2), dim=0)
+
+    # 现在，merged_points 的形状为 (2, N, 3)
+    # 其中 2 表示有两个点云，N = N1 + N2 表示合并后的总点数
+    # 3 表示每个点云中点的维度
+
+    print(merged_points)
 
 

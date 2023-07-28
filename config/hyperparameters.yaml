@@ -1,23 +1,15 @@
 # Training Parameters -------------------------------
 ## Loss Computation
 max_epoch: 200
-batch_size: 1 # batch_size > 1 currently only supported if single image dims are used (vertical and horizontal cells)
+batch_size: 2 # batch_size > 1 currently only supported if single image dims are used (vertical and horizontal cells)
 # In general: larger batches currently implemented rather primitively
 learning_rate: 0.00001 #1e-5
-lambda_po2pl: 1.0 # 10.0
 ## Network training options
 use_dropout: False
 ## Data Augmentation
-random_point_cloud_rotations: False # Data augmentation by rotating point cloud during training
+random_point_cloud_rotations: True # Data augmentation by rotating point cloud during training
 random_rotations_only_yaw: False # If set to true, and random_point_cloud_rotations set to true --> rotations only about yaw axis
 magnitude_random_rot: 4.0 # in degrees
-## Loss Functions
-normal_loss: "squared" # "squared" or "linear"
-rotation_losses_only_plane_to_plane: False
-point_to_point_loss: False
-point_to_plane_loss: True
-plane_to_plane_loss: True
-po2po_alone: False
 
 # Network Parameters ---------------------------------
 ## Data Format

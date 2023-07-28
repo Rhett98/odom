@@ -35,11 +35,6 @@ class PreprocessedPointCloudDataset(torch.utils.data.dataset.Dataset):
         # init SemLaserScan
         self.learning_map = self.config["learning_map"]
         self.img_projection = utility.projection.ImageProjection(config)
-        # self.scan = SemLaserScan(project=True,
-        #                         H=self.config["kitti"]["horizontal_cells"],
-        #                         W=self.config["kitti"]["vertical_cells"],
-        #                         fov_up=self.config["horizontal_field_of_view"][1],
-        #                         fov_down=self.config["horizontal_field_of_view"][0])
 
         # Go through dataset(s) and create file lists
         for index_of_dataset, dataset in enumerate(self.config["datasets"]):
@@ -373,6 +368,10 @@ class PoseDataset(torch.utils.data.dataset.Dataset):
     def __len__(self):
         return self.num_scans_overall
 
+def list_collate(batch_dicts):
+        data_dicts = [batch_dict for batch_dict in batch_dicts]
+        return data_dicts
+
 if __name__ == '__main__':
     import utility.projection
     import yaml
@@ -392,12 +391,13 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(dataset=DATASET,
                                                  batch_size=1,
                                                  shuffle=True,
+                                                 collate_fn=list_collate,
                                                  num_workers=0,
                                                  pin_memory=False)
     for preprocessed_dicts in dataloader:
         # print("scan:", preprocessed_dicts)
-        print("scan:", preprocessed_dicts["scan_1"].shape)
-        print("label:", preprocessed_dicts["proj_label_1"].shape)
+        print("scan:", preprocessed_dicts[0]["pose"].shape)
+        print("label:", type(preprocessed_dicts[0]["proj_label_1"]))
         # img = img_projection.do_spherical_projection(preprocessed_dicts["scan_1"][0,:,:])
         # print(img[0].shape,img[1].shape,img[2].shape)
         # print(img[0])

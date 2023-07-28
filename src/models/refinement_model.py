@@ -10,7 +10,6 @@ import models.resnet_modified
 import utility.projection
 
 class OdometryModel(torch.nn.Module):
-
     def __init__(self, config):
         super(OdometryModel, self).__init__()
 
@@ -20,7 +19,7 @@ class OdometryModel(torch.nn.Module):
         self.pre_feature_extraction = config["pre_feature_extraction"]
         in_channels = 8
         num_feature_extraction_layers = 5
-        self.img_projection = utility.projection.ImageProjectionLayer(config=config)
+        self.img_projection = utility.projection.ImageProjection(config=config)
 
         self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=(1, 2), padding=(1, 0))
 
@@ -136,24 +135,30 @@ class OdometryModel(torch.nn.Module):
         # geometry_handler does not contain any trainable parameters
         self.geometry_handler = models.model_parts.GeometryHandler(config=config)
     
-    def proj_image(self, input_scan, preprocessed_dicts):
+    def proj_image(self, input_scan):
+        """project pointcloud to image coordinate
+        input_scan: (b, 4, n) or (b, 3, n) without remission
+        """
         # Use every batchindex separately
+        num_point = self.config["kitti"]["vertical_cells"]*self.config["kitti"]["horizontal_cells"]
         images_model = torch.zeros(self.batch_size, 4,
-                                     self.config[preprocessed_dicts[0]["dataset"]]["vertical_cells"],
-                                     self.config[preprocessed_dicts[0]["dataset"]]["horizontal_cells"],
+                                     self.config["kitti"]["vertical_cells"],
+                                     self.config["kitti"]["horizontal_cells"],
+                                     device=self.device)
+        proj_xyz_model = torch.zeros(self.batch_size, 3,
+                                     num_point,
                                      device=self.device)
         for index in range(0, self.batch_size):
             # preprocessed_dict = self.augment_input(preprocessed_data=preprocessed_dict)
             # Training / Testing
-            image_1, _, _, point_cloud_indices_1, _ = self.img_projection(
-                input=input_scan, dataset=preprocessed_dicts[0]["dataset"])
-            image_model = image_1[0]
-            
-            proj_xyz = input_scan[:, :, point_cloud_indices_1]
+            image_range, image_xyz, image_remission = self.img_projection.do_spherical_projection(
+                input_scan[index])
+            # image_model = torch.cat([image_range, image_xyz, image_remission])
+            image_model = torch.cat([image_range, image_xyz])
             # Write projected image to batch
             images_model[index] = image_model
-        print("visual point mun = ", proj_xyz.shape[2])
-        return images_model, proj_xyz
+            proj_xyz_model[index] = image_xyz.view(3, -1).to(self.device)
+        return images_model, proj_xyz_model
     
     def warp_pointcloud(self, pc_xyz, translation, rotation):
         inv_q = models.model_parts.inv_q(rotation)
@@ -162,7 +167,7 @@ class OdometryModel(torch.nn.Module):
         pc_xyz = torch.cat([torch.zeros(pc_xyz.size(0), pc_xyz.size(1), 1, device=pc_xyz.device), pc_xyz], dim=2)
         # multi : q*p*q- 
         warp_pc = models.model_parts.mul_q_point(rotation, pc_xyz)
-        warp_pc = models.model_parts.mul_point_q(warp_pc, inv_q)[..., 1:] + translation
+        warp_pc = models.model_parts.mul_point_q(warp_pc, inv_q)[..., 1:] + translation.view(-1, 1, 3)
         return warp_pc.transpose(1,2)
     
     def warp_det_result(self, q0, t0, q1, t1):
@@ -172,7 +177,7 @@ class OdometryModel(torch.nn.Module):
         t0 = t0.unsqueeze(1).clone()
         t0 = torch.cat([torch.zeros(t0.size(0), t0.size(1), 1, device=t0.device), t0], dim=2)
         warp_t = models.model_parts.mul_q_point(q1, t0)
-        warp_t = models.model_parts.mul_point_q(warp_t, inv_q1)[..., 1:] + t1
+        warp_t = models.model_parts.mul_point_q(warp_t, inv_q1)[..., 1:] + t1.view(-1, 1, 3)
         return warp_q.squeeze(1), warp_t.squeeze(1)
     
     def forward_features(self, image_1, image_2):
@@ -184,16 +189,9 @@ class OdometryModel(torch.nn.Module):
             x = torch.cat((image_1, image_2), dim=1)
         return x
     
-    def forward(self, preprocessed_dicts):
-        origin_xyz_l1 = preprocessed_dicts[0]["scan_1"]
-        origin_xyz_l2= preprocessed_dicts[0]["scan_2"]
-        
-        image_1, proj_xyz_1 = self.proj_image(origin_xyz_l1, preprocessed_dicts)
-        image_2, _ = self.proj_image(origin_xyz_l2, preprocessed_dicts)
-        # image_1 = torch.nn.functional.pad(input=image_1, pad=(1, 1, 0, 0), mode='circular')
-        # image_1 = self.maxpool(image_1)
-        # image_2 = torch.nn.functional.pad(input=image_2, pad=(1, 1, 0, 0), mode='circular')
-        # image_2 = self.maxpool(image_2)
+    def forward(self, xyz_1, xyz_2):
+        image_1, proj_point_1 = self.proj_image(xyz_1)
+        image_2, _ = self.proj_image(xyz_2)
         
         ### l1-layer ###
         features_l1 = self.resnet1(self.forward_features(image_1=image_1, image_2=image_2))
@@ -202,8 +200,8 @@ class OdometryModel(torch.nn.Module):
         l1_q = l1_q / torch.norm(l1_q)
         
         ### l2-layer ###
-        warp_xyz_1_l1 = self.warp_pointcloud(proj_xyz_1, l1_t, l1_q)
-        image_1_l2, _ = self.proj_image(warp_xyz_1_l1, preprocessed_dicts)
+        warp_xyz_1_l1 = self.warp_pointcloud(proj_point_1, l1_t, l1_q)
+        image_1_l2, _= self.proj_image(warp_xyz_1_l1)
         
         features_l2 = self.resnet2(self.forward_features(image_1=image_1_l2, image_2=image_2))
         l2_q_det = self.fully_connected_rotation2(features_l2)
@@ -213,8 +211,8 @@ class OdometryModel(torch.nn.Module):
         l2_q, l2_t = self.warp_det_result(l1_q, l1_t, l2_q_det, l2_t_det)
         
         ### l3-layer ###
-        warp_xyz_1_l2 = self.warp_pointcloud(proj_xyz_1, l2_t, l2_q)
-        image_1_l3, _ = self.proj_image(warp_xyz_1_l2, preprocessed_dicts)
+        warp_xyz_1_l2 = self.warp_pointcloud(proj_point_1, l2_t, l2_q)
+        image_1_l3, _ = self.proj_image(warp_xyz_1_l2)
         
         features_l3 = self.resnet3(self.forward_features(image_1=image_1_l3, image_2=image_2))
         l3_q_det = self.fully_connected_rotation3(features_l3)
@@ -224,8 +222,8 @@ class OdometryModel(torch.nn.Module):
         l3_q, l3_t = self.warp_det_result(l2_q, l2_t, l3_q_det, l3_t_det)
         
         ### l4-layer ###
-        warp_xyz_1_l3 = self.warp_pointcloud(proj_xyz_1, l3_t, l3_q)
-        image_1_l4, _ = self.proj_image(warp_xyz_1_l3, preprocessed_dicts)
+        warp_xyz_1_l3 = self.warp_pointcloud(proj_point_1, l3_t, l3_q)
+        image_1_l4, _ = self.proj_image(warp_xyz_1_l3)
         
         features_l4 = self.resnet4(self.forward_features(image_1=image_1_l4, image_2=image_2))
         l4_q_det = self.fully_connected_rotation4(features_l4)
@@ -233,7 +231,7 @@ class OdometryModel(torch.nn.Module):
         l4_q_det = l4_q_det / torch.norm(l4_q_det)
         l4_q, l4_t = self.warp_det_result(l3_q, l3_t, l4_q_det, l4_t_det)
 
-        return (l4_q, l3_q, l2_q, l1_q),(l4_t, l3_t, l2_t, l1_t)
+        return (l1_q, l2_q, l3_q, l4_q),(l1_t, l2_t, l3_t, l4_t)
 
 if __name__ == '__main__':
     from thop import profile

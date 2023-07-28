@@ -19,6 +19,7 @@ kitti: # must be the same as dataset name specified in deployment_options.yaml
   vertical_field_of_view: [ -23.5, 2.0 ]  # taken from the datasheet, in degrees
   vertical_cells: 64 # Number4of LiDAR rings
   horizontal_cells: 1024 # Can be defined, should not be larger than horizontal resolution of LiDAR
+  max_points: 150000
   ### Pre-processed file
   preprocessed_path: "../dataset/sequences"
   ### Ground-truth poses
